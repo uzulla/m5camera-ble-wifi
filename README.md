@@ -117,7 +117,7 @@ tools/ble_snap.py out.jpg "w=96&h=96&q=0&gray=1"   # macOS / Linux。uv が blea
 ## I2C（他のマイコンから取得）
 
 Grove ポート（**SDA=IO4, SCL=IO13**）の I2C スレーブ（7bit アドレス `0x42`）として動作します。カメラの SCCB（IO22/23）とは別のバスです。
-ESP32 のスレーブはクロックストレッチができないため、**「コマンドを書く → 2ms 以上待つ → 応答を読む」の 2 段階**です。
+ESP32 のスレーブはクロックストレッチができないため、**「コマンドを書く → 1ms 以上待つ → 応答を読む」の 2 段階**です。
 
 | 手順 | マスターの操作 | 内容 |
 |---|---|---|
@@ -126,7 +126,7 @@ ESP32 のスレーブはクロックストレッチができないため、**「
 | 3 | 書き込み `[0x03][offset u32][n u8]` → n+3 バイト読み出し | DATA: `[0xA5][n][data × n][crc8]` |
 | 4 | offset を進めて total まで 3 を繰り返す | |
 
-crc8 は多項式 0x07・初期値 0 で、`0xA5` の次のバイトから crc8 の直前までが対象です。先頭が `0xA5` でない / crc が合わないときは同じ要求をやり直します（`n` は 29 以下を推奨。ESP32 の FIFO が 32 バイトのため。100kHz なら最大 120）。
+crc8 は多項式 0x07・初期値 0 で、`0xA5` の次のバイトから crc8 の直前までが対象です。先頭が `0xA5` でない / crc が合わないときは同じ要求をやり直します（`n` は 120 を推奨。1MHz・待ち 1ms で 1024x768 の JPEG（約 25KB）を約 0.5 秒で読める。詳細は docs/i2c.md の「転送時間」）。
 
 ### 電源（USB と Grove の同時接続）
 
@@ -137,7 +137,7 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 - 基板に DTR/RTS の自動リセット回路がある。**ポートを開くだけ（DTR/RTS を触らない）ならリセットされない**が、DTR/RTS を両方オフにするなどの操作（書き込みや一部のモニタ）でカメラがリセットされ、I2C の転送も途切れる。ログを読むだけなら DTR/RTS を触らない（`idf.py monitor` は `--no-reset`）
 - HTTP / BLE / I2C は同時に使えます（撮影は内部で直列化されます）
 
-詳細（配線、バイト列の例、マスターの実装例、内部構造）は [docs/i2c.md](docs/i2c.md) にあります。
+詳細（配線、バイト列の例、マスターの実装例、内部構造）は [docs/i2c.md](docs/i2c.md)、マスターのサンプルは [examples/powerhub_i2c_master/](examples/powerhub_i2c_master/) にあります。
 
 ## 構成
 
@@ -150,6 +150,7 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 | `main/i2c_snap.c` | I2C スレーブ（他のマイコンからの取得） |
 | `main/cpu_mon.c` | FreeRTOS の実行時間統計から CPU 使用率を算出 |
 | `docs/i2c.md` | I2C の開発者向け資料 |
+| `examples/powerhub_i2c_master/` | I2C マスターのサンプル（PowerHub / ESP-IDF） |
 | `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py` |
 
 カメラのピン: XCLK 27 / SIOD 22 / SIOC 23 / VSYNC 25 / HREF 26 / PCLK 21 / RESET 15 / D0〜D7 = 32, 35, 34, 5, 39, 18, 36, 19。

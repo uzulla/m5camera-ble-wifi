@@ -137,6 +137,8 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 - 基板に DTR/RTS の自動リセット回路がある。**ポートを開くだけ（DTR/RTS を触らない）ならリセットされない**が、DTR/RTS を両方オフにするなどの操作（書き込みや一部のモニタ）でカメラがリセットされ、I2C の転送も途切れる。ログを読むだけなら DTR/RTS を触らない（`idf.py monitor` は `--no-reset`）
 - HTTP / BLE / I2C は同時に使えます（撮影は内部で直列化されます）
 
+詳細（配線、バイト列の例、マスターの実装例、内部構造）は [docs/i2c.md](docs/i2c.md) にあります。
+
 ## 構成
 
 | ファイル | 役割 |
@@ -147,6 +149,7 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 | `main/ble_snap.c` | NimBLE の GATT サービス |
 | `main/i2c_snap.c` | I2C スレーブ（他のマイコンからの取得） |
 | `main/cpu_mon.c` | FreeRTOS の実行時間統計から CPU 使用率を算出 |
+| `docs/i2c.md` | I2C の開発者向け資料 |
 | `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py` |
 
 カメラのピン: XCLK 27 / SIOD 22 / SIOC 23 / VSYNC 25 / HREF 26 / PCLK 21 / RESET 15 / D0〜D7 = 32, 35, 34, 5, 39, 18, 36, 19。

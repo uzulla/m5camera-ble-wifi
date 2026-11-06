@@ -239,4 +239,6 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 | `examples/powerhub_i2c_master/` | I2C マスターのサンプル（PowerHub / ESP-IDF） |
 | `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py`、`status_scan.py`（状態の広告を読む）、`ble_set_wifi.py`（BLE で Wi-Fi を登録） |
 
+側面のボタンは EN（リセット）で、ソフトからは読めません。回路図上もスイッチはこれ 1 つです。
+
 カメラのピン: XCLK 27 / SIOD 22 / SIOC 23 / VSYNC 25 / HREF 26 / PCLK 21 / RESET 15 / D0〜D7 = 32, 35, 34, 5, 39, 18, 36, 19。

@@ -21,7 +21,7 @@ static const char *TAG = "wifi";
 #define BIT_GOT_IP (1 << 0)
 #define BIT_DISCONNECTED (1 << 1)
 #define BIT_CFG_CHANGED (1 << 2)
-#define CONNECT_TIMEOUT_MS 15000
+#define CONNECT_TIMEOUT_MS 60000   // 接続〜IP 取得まで。モバイルルーターなど DHCP が遅いものがあるので 1 分待つ
 #define IDLE_RETRY_MS 10000
 
 static EventGroupHandle_t s_ev;
@@ -188,6 +188,11 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
             ESP_LOGW(TAG, "STA disconnected (reason %d)", d->reason);
             xEventGroupClearBits(s_ev, BIT_GOT_IP);
             xEventGroupSetBits(s_ev, BIT_DISCONNECTED);
+            break;
+        }
+        case WIFI_EVENT_STA_CONNECTED: {
+            wifi_event_sta_connected_t *d = data;
+            ESP_LOGI(TAG, "STA associated with \"%.*s\" (ch %d, authmode %d); waiting for DHCP", d->ssid_len, d->ssid, d->channel, d->authmode);
             break;
         }
         case WIFI_EVENT_AP_STACONNECTED: {

@@ -51,6 +51,38 @@ size_t status_adv_build(uint8_t *buf, size_t cap)
     return STATUS_ADV_FIXED + n;
 }
 
+static void json_str(char *dst, size_t len, const char *s)
+{
+    size_t o = 0;
+    for (; *s && o + 3 < len; s++) {
+        if (*s == '"' || *s == '\\') dst[o++] = '\\';
+        if ((unsigned char)*s < 0x20) continue;
+        dst[o++] = *s;
+    }
+    dst[o] = 0;
+}
+
+int status_adv_json(char *buf, size_t cap)
+{
+    wifi_sta_status_t st;
+    wifi_mgr_status(&st);
+    wifi_ap_client_t cl[4];
+    int ncl = wifi_mgr_ap_clients(cl, 4);
+    char ssid[80], target[80];
+    json_str(ssid, sizeof(ssid), st.ssid);
+    json_str(target, sizeof(target), st.target_ssid);
+    int o = snprintf(buf, cap,
+                     "{\"id\":\"%02x%02x%02x\",\"uptime_s\":%lld,\"camera\":%s,\"busy\":%s,\"free_heap\":%u,"
+                     "\"ap\":{\"ip\":\"192.168.4.1\",\"clients\":%d},"
+                     "\"sta\":{\"configured\":%s,\"connected\":%s,\"ssid\":\"%s\",\"target_ssid\":\"%s\",\"ip\":\"%s\",\"gw\":\"%s\",\"rssi\":%d}}",
+                     st.mac_raw[3], st.mac_raw[4], st.mac_raw[5], esp_timer_get_time() / 1000000LL,
+                     snap_ready() ? "true" : "false", snap_busy() ? "true" : "false",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), ncl,
+                     wifi_mgr_sta_configured() ? "true" : "false", st.connected ? "true" : "false",
+                     ssid, target, st.ip, st.gw, st.connected ? st.rssi : 0);
+    return o < (int)cap ? o : (int)cap - 1;
+}
+
 static void task(void *arg)
 {
     uint8_t last[STATUS_ADV_MAX];

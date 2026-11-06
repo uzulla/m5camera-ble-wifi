@@ -117,6 +117,7 @@ tools/ble_set_wifi.py --list                 # 登録一覧
 | Service | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0001` |
 | REQ（Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0002` — `w=160&h=120&q=20&rot=90&gray=1` のように HTTP と同じクエリを書く（空でも可） |
 | DATA（Notify） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0003` — `[seq u16 LE][payload]` |
+| STATUS（Read） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0005` — 状態の JSON（`/status` の簡略版: `id`、`uptime_s`、`camera`、`busy`、`free_heap`、`ap.clients`、`sta.{configured,connected,ssid,target_ssid,ip,gw,rssi}`）。広告をスキャンできない Web Bluetooth 向け |
 | WIFI（Read / Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004` — Write: `ssid=HomeAP&pass=secret&prio=10`（`POST /wifi` と同じ書式。URL エンコード）で NVS に登録 / 更新、`ssid=HomeAP&del=1` で削除。Read: 登録一覧の JSON（`GET /wifi` と同じ）。失敗は ATT エラー `0x80`（不正）/ `0x81`（8 件超）/ `0x82`（見つからない） |
 
 DATA を購読してから REQ に書くと、撮影後に通知で届きます。`seq=0` の payload は `[JPEG 全長 u32 LE][JPEG の先頭]`、以降は続き。`seq=0xFFFF` はエラーメッセージ（ASCII）です。
@@ -154,6 +155,35 @@ tools/status_scan.py wifi wlp1s0  # Wi-Fi ビーコンを読む（Linux。iw か
 
 IP と SSID は平文で周囲に撒かれます。AP が無パスワードなのと同じく、信頼できる場所で使う前提です。
 
+## Web Bluetooth（Android の Chrome から操作）
+
+`web/index.html` 1 枚で、状態の表示、Wi-Fi の登録 / 削除、スナップの表示ができます。アプリは不要で、Android の Chrome で開くだけです（iOS の Safari は Web Bluetooth 非対応）。
+
+Web Bluetooth は **HTTPS のページでしか動きません**（`file://` も M5Cam 自身の HTTP も不可）。配信は buildhost（Tailscale IP `<buildhost の Tailscale IP>`、tailnet `<tailnet>.ts.net`）で行います。
+
+**本来の形: Tailscale Serve（HTTPS）**
+
+```bash
+# buildhost 上。~/m5_jpg_snapshot/web は tools/sync.sh で同期される
+sudo tailscale serve --bg ~/m5_jpg_snapshot/web          # https://buildhost.<tailnet>.ts.net/
+sudo tailscale serve status
+```
+
+前提として、Tailscale の管理コンソール（https://login.tailscale.com/admin/dns）で **MagicDNS と HTTPS Certificates が有効**であること（無効だと `tailscale serve` が「your Tailscale account does not support getting TLS certs」で止まる）。buildhost では上の serve を設定済みで、`https://buildhost.<tailnet>.ts.net/` が正規の証明書で応答します。
+
+開く端末側は Tailscale に入っていて、**「Use Tailscale DNS」が有効**である必要があります（Android アプリは既定で有効。Mac の CLI で無効になっている場合は `tailscale set --accept-dns=true`）。名前が解決できないときはこれが原因です。
+
+**当面の代替: HTTP + Chrome のフラグ**
+
+HTTPS が使えない環境向けの予備として、buildhost の systemd サービス `m5cam-web.service`（`python3 -m http.server`、tailnet IP にだけ bind）が `http://<buildhost の Tailscale IP>:8080/` で同じページを配っています。不要なら止めてください。Android の Chrome で `chrome://flags/#unsafely-treat-insecure-origin-as-secure` に `http://<buildhost の Tailscale IP>:8080` を登録して Chrome を再起動すると、この URL で Web Bluetooth が使えます。自分の端末だけで使う前提なら実用になります（Android 側も Tailscale に入っていること）。
+
+```bash
+ssh buildhost sudo systemctl status m5cam-web      # 状態
+ssh buildhost sudo systemctl disable --now m5cam-web   # 止める
+```
+
+ページ側は GATT の STATUS / WIFI / REQ / DATA 特性を使っていて、Python ツールと同じ書式です。広告のスキャン（接続なしで IP を知る）は Chrome の Web Bluetooth では標準で使えないため、接続して STATUS を読む作りになっています。
+
 ## I2C（他のマイコンから取得）
 
 Grove ポート（**SDA=IO4, SCL=IO13**）の I2C スレーブ（7bit アドレス `0x42`）として動作します。カメラの SCCB（IO22/23）とは別のバスです。
@@ -190,6 +220,7 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 | `main/status_adv.c` | 状態のバイト列を組み立て、BLE 広告と AP のベンダー IE に反映 |
 | `main/i2c_snap.c` | I2C スレーブ（他のマイコンからの取得） |
 | `main/cpu_mon.c` | FreeRTOS の実行時間統計から CPU 使用率を算出 |
+| `web/index.html` | Web Bluetooth のページ（Android の Chrome 向け。状態・Wi-Fi 登録・スナップ） |
 | `docs/i2c.md` | I2C の開発者向け資料 |
 | `examples/powerhub_i2c_master/` | I2C マスターのサンプル（PowerHub / ESP-IDF） |
 | `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py`、`status_scan.py`（状態の広告を読む）、`ble_set_wifi.py`（BLE で Wi-Fi を登録） |

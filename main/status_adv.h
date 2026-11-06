@@ -30,5 +30,7 @@
 
 // 現在の状態を buf に詰めて長さを返す。cap が足りなければ SSID を切る
 size_t status_adv_build(uint8_t *buf, size_t cap);
+// 状態を JSON で書く（BLE の STATUS 特性用。/status の簡略版）。書いた長さを返す
+int status_adv_json(char *buf, size_t cap);
 // 定期的に状態を組み立て、変化があれば BLE と Wi-Fi に反映するタスクを開始する
 esp_err_t status_adv_start(void);

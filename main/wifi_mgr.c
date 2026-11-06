@@ -9,6 +9,8 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "esp_http_server.h"   // httpd_query_key_value（クエリ文字列の解析にだけ使う）
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
@@ -29,6 +31,7 @@ static esp_netif_t *s_sta_netif;
 static esp_netif_t *s_ap_netif;
 static volatile int s_cfg_n;            // NVS の登録件数（sta_task が更新）
 static char s_target_ssid[33];          // 接続を試みている SSID
+static bool s_ap_on = true, s_sta_on = true;   // この起動で動いている無線
 
 // ---- NVS: ssid<i> / pass<i> / prio<i> (i = 0..7) ----
 
@@ -112,6 +115,67 @@ esp_err_t wifi_cfg_del(const char *ssid)
     nvs_close(h);
     if (e == ESP_OK) xEventGroupSetBits(s_ev, BIT_CFG_CHANGED);
     return e;
+}
+
+// ---- 無線のオンオフ（NVS: ap_en / sta_en, u8。無ければ on）----
+
+void wifi_cfg_radio_get(bool *ap_en, bool *sta_en)
+{
+    *ap_en = *sta_en = true;
+    nvs_handle_t h;
+    if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) return;
+    uint8_t v;
+    if (nvs_get_u8(h, "ap_en", &v) == ESP_OK) *ap_en = v != 0;
+    if (nvs_get_u8(h, "sta_en", &v) == ESP_OK) *sta_en = v != 0;
+    nvs_close(h);
+}
+
+void wifi_mgr_radio_active(bool *ap_on, bool *sta_on)
+{
+    *ap_on = s_ap_on;
+    *sta_on = s_sta_on;
+}
+
+esp_err_t wifi_cfg_apply_radio_query(const char *query, bool *reboot)
+{
+    char v[8];
+    bool any = false;
+    int ap = -1, sta = -1;
+    if (httpd_query_key_value(query, "ap", v, sizeof(v)) == ESP_OK) { ap = atoi(v) != 0; any = true; }
+    if (httpd_query_key_value(query, "sta", v, sizeof(v)) == ESP_OK) { sta = atoi(v) != 0; any = true; }
+    if (reboot) *reboot = false;
+    if (httpd_query_key_value(query, "reboot", v, sizeof(v)) == ESP_OK && atoi(v)) { if (reboot) *reboot = true; any = true; }
+    if (!any) return ESP_ERR_INVALID_ARG;
+    if (ap < 0 && sta < 0) return ESP_OK;
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    if (ap >= 0) e = nvs_set_u8(h, "ap_en", ap);
+    if (e == ESP_OK && sta >= 0) e = nvs_set_u8(h, "sta_en", sta);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "radio config saved: ap=%d sta=%d (takes effect after reboot)", ap, sta);
+    return e;
+}
+
+int wifi_radio_json(char *buf, size_t cap)
+{
+    bool ap_en, sta_en;
+    wifi_cfg_radio_get(&ap_en, &sta_en);
+    int o = snprintf(buf, cap, "{\"ap\":%s,\"sta\":%s,\"active\":{\"ap\":%s,\"sta\":%s}}",
+                     ap_en ? "true" : "false", sta_en ? "true" : "false",
+                     s_ap_on ? "true" : "false", s_sta_on ? "true" : "false");
+    return o < (int)cap ? o : (int)cap - 1;
+}
+
+static void reboot_cb(void *arg) { esp_restart(); }
+
+void wifi_mgr_reboot_later(void)
+{
+    ESP_LOGW(TAG, "rebooting in 0.7 s");
+    const esp_timer_create_args_t a = {.callback = reboot_cb, .name = "reboot"};
+    esp_timer_handle_t t;
+    if (esp_timer_create(&a, &t) == ESP_OK) esp_timer_start_once(t, 700000);
 }
 
 // ---- クエリ書式（HTTP / BLE 共通）----
@@ -294,6 +358,7 @@ bool wifi_mgr_sta_configured(void) { return s_cfg_n > 0; }
 esp_err_t wifi_mgr_set_status_ie(const uint8_t *payload, size_t len)
 {
     if (len > VND_MAX_PAYLOAD) return ESP_ERR_INVALID_SIZE;
+    if (!s_ap_on) return ESP_ERR_INVALID_STATE;   // AP が止まっていればビーコンも無い
     static uint8_t buf[sizeof(vendor_ie_data_t) + VND_MAX_PAYLOAD];
     vendor_ie_data_t *ie = (vendor_ie_data_t *)buf;
     ie->element_id = WIFI_VENDOR_IE_ELEMENT_ID;
@@ -359,9 +424,17 @@ esp_err_t wifi_mgr_start(void)
             .authmode = WIFI_AUTH_OPEN,
         },
     };
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
+    wifi_cfg_radio_get(&s_ap_on, &s_sta_on);
+    wifi_mode_t mode = s_ap_on && s_sta_on ? WIFI_MODE_APSTA : s_ap_on ? WIFI_MODE_AP : s_sta_on ? WIFI_MODE_STA : WIFI_MODE_NULL;
+    if (mode == WIFI_MODE_NULL) {
+        ESP_LOGW(TAG, "AP and STA are both disabled in NVS; Wi-Fi off (BLE / I2C only)");
+        return ESP_OK;
+    }
+    ESP_ERROR_CHECK(esp_wifi_set_mode(mode));
+    if (s_ap_on) ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "AP \"%s\" started (192.168.4.1)", AP_SSID);
+    if (s_ap_on) ESP_LOGI(TAG, "AP \"%s\" started (192.168.4.1)", AP_SSID);
+    else ESP_LOGW(TAG, "AP disabled in NVS");
+    if (!s_sta_on) { ESP_LOGW(TAG, "STA disabled in NVS"); return ESP_OK; }
     return xTaskCreate(sta_task, "wifi_sta", 4096, NULL, 4, NULL) == pdPASS ? ESP_OK : ESP_FAIL;
 }

@@ -194,6 +194,27 @@ static esp_err_t wifi_apply_handler(httpd_req_t *req, bool del)
 static esp_err_t wifi_post_handler(httpd_req_t *req) { return wifi_apply_handler(req, false); }
 static esp_err_t wifi_delete_handler(httpd_req_t *req) { return wifi_apply_handler(req, true); }
 
+// ---- /radio  GET:保存値と現在の状態  POST:ap=&sta=（NVS に保存、次の起動から）&reboot=1 ----
+
+static esp_err_t radio_get_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int o = wifi_radio_json(buf, sizeof(buf));
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, buf, o);
+}
+
+static esp_err_t radio_post_handler(httpd_req_t *req)
+{
+    char q[128];
+    get_query(req, q, sizeof(q));
+    bool reboot = false;
+    if (wifi_cfg_apply_radio_query(q, &reboot) != ESP_OK) return send_error(req, "400 Bad Request", "ap=0|1, sta=0|1, reboot=1");
+    esp_err_t e = radio_get_handler(req);
+    if (reboot) wifi_mgr_reboot_later();
+    return e;
+}
+
 static esp_err_t index_handler(httpd_req_t *req)
 {
     static const char html[] =
@@ -204,7 +225,8 @@ static esp_err_t index_handler(httpd_req_t *req)
         "<li><a href='/jpg?w=160&h=120&q=10&gray=1'>/jpg?w=160&amp;h=120&amp;q=10&amp;gray=1</a></li>"
         "<li><a href='/jpg_stream'>/jpg_stream</a> (+ fps)</li>"
         "<li><a href='/cpu'>/cpu</a></li><li><a href='/status'>/status</a></li>"
-        "<li><a href='/wifi'>/wifi</a></li></ul>";
+        "<li><a href='/wifi'>/wifi</a></li>"
+        "<li><a href='/radio'>/radio</a> (POST ap=0|1 sta=0|1 reboot=1)</li></ul>";
     return httpd_resp_send(req, html, sizeof(html) - 1);
 }
 
@@ -227,6 +249,8 @@ esp_err_t http_start(void)
         {.uri = "/wifi", .method = HTTP_GET, .handler = wifi_list_handler},
         {.uri = "/wifi", .method = HTTP_POST, .handler = wifi_post_handler},
         {.uri = "/wifi", .method = HTTP_DELETE, .handler = wifi_delete_handler},
+        {.uri = "/radio", .method = HTTP_GET, .handler = radio_get_handler},
+        {.uri = "/radio", .method = HTTP_POST, .handler = radio_post_handler},
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) httpd_register_uri_handler(srv, &uris[i]);
     ESP_LOGI(TAG, "HTTP server started");

@@ -69,6 +69,20 @@
 </section>
 
 <section>
+  <h2>無線（AP / STA）</h2>
+  <p class="muted" style="margin:0 0 8px;font-size:14px">保存すると次の起動から有効です。両方オフにすると Wi-Fi は止まり、BLE と I2C だけになります。</p>
+  <div class="row">
+    <label style="margin:0;display:flex;gap:6px;align-items:center;color:var(--fg)"><input type="checkbox" id="radio_ap" style="width:auto"> AP（M5Cam / 192.168.4.1）</label>
+    <label style="margin:0;display:flex;gap:6px;align-items:center;color:var(--fg)"><input type="checkbox" id="radio_sta" style="width:auto"> STA（Wi-Fi に接続）</label>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button id="radio_save" class="primary" disabled>保存</button>
+    <button id="reboot" disabled>再起動</button>
+    <span id="radio_msg" class="muted"></span>
+  </div>
+</section>
+
+<section>
   <h2>スナップ</h2>
   <label for="q">パラメータ（/jpg と同じ）</label>
   <input id="q" value="w=320&h=240&q=40" autocapitalize="off" autocomplete="off">
@@ -91,6 +105,7 @@ const REQ    = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0002';
 const DATA   = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0003';
 const WIFI   = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004';
 const STATUS = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0005';
+const CTRL   = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0006';
 
 const $ = id => document.getElementById(id);
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -103,7 +118,7 @@ function log(msg, cls) {
 }
 
 function setConnected(on) {
-  for (const id of ['disconnect', 'refresh', 'setwifi', 'snap']) $(id).disabled = !on;
+  for (const id of ['disconnect', 'refresh', 'setwifi', 'snap', 'radio_save', 'reboot']) $(id).disabled = !on;
   $('connect').disabled = on;
   $('connstate').textContent = on ? `接続中: ${device.name}` : '未接続';
   $('connstate').className = on ? 'ok' : 'muted';
@@ -122,13 +137,14 @@ $('connect').onclick = async () => {
     log(`接続中: ${device.name}`);
     const server = await device.gatt.connect();
     const svc = await server.getPrimaryService(SVC);
-    for (const [k, u] of Object.entries({ req: REQ, data: DATA, wifi: WIFI, status: STATUS })) ch[k] = await svc.getCharacteristic(u);
+    for (const [k, u] of Object.entries({ req: REQ, data: DATA, wifi: WIFI, status: STATUS, ctrl: CTRL })) ch[k] = await svc.getCharacteristic(u);
     ch.data.addEventListener('characteristicvaluechanged', onData);
     await ch.data.startNotifications();
     setConnected(true);
     log('接続しました');
     await refreshStatus();
     await refreshWifi();
+    await refreshRadio();
   } catch (e) {
     log(`接続失敗: ${e.message}`);
   }
@@ -216,6 +232,38 @@ $('setwifi').onclick = async () => {
     log(`失敗: ${e.message}`);
   } finally {
     $('setwifi').disabled = false;
+  }
+};
+
+// ---- 無線 ----
+async function refreshRadio() {
+  const r = await readJson(ch.ctrl);
+  $('radio_ap').checked = r.ap;
+  $('radio_sta').checked = r.sta;
+  const pending = r.ap !== r.active.ap || r.sta !== r.active.sta;
+  $('radio_msg').textContent = pending ? '保存済み。再起動すると反映されます' : `現在: AP ${r.active.ap ? 'on' : 'off'} / STA ${r.active.sta ? 'on' : 'off'}`;
+}
+
+$('radio_save').onclick = async () => {
+  const ap = $('radio_ap').checked ? 1 : 0, sta = $('radio_sta').checked ? 1 : 0;
+  if (!ap && !sta && !confirm('AP と STA を両方オフにします。次の起動から Wi-Fi は使えず、BLE（このページ）か I2C だけになります。よろしいですか？')) return;
+  try {
+    await ch.ctrl.writeValueWithResponse(enc.encode(`ap=${ap}&sta=${sta}`));
+    log(`無線設定を保存: AP ${ap ? 'on' : 'off'} / STA ${sta ? 'on' : 'off'}`);
+    await refreshRadio();
+  } catch (e) {
+    $('radio_msg').textContent = `失敗: ${e.message}`; log(`無線設定の保存に失敗: ${e.message}`);
+  }
+};
+
+$('reboot').onclick = async () => {
+  if (!confirm('M5Cam を再起動します。BLE は切断されるので、数秒後に「接続」から繋ぎ直してください。')) return;
+  try {
+    await ch.ctrl.writeValueWithResponse(enc.encode('reboot=1'));
+    log('再起動を指示しました');
+    $('radio_msg').textContent = '再起動中… 数秒後に「接続」で繋ぎ直してください';
+  } catch (e) {
+    log(`再起動の指示に失敗: ${e.message}`);
   }
 };
 

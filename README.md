@@ -25,6 +25,17 @@ STA の IP は、接続せずに読める **状態の広告**（後述。BLE 広
 
 > AP はパスワードなしで、`/wifi` も認証なしです。信頼できる場所でのみ使ってください。
 
+## AP / STA のオンオフ
+
+AP と STA はそれぞれ止められます。設定は NVS（`ap_en` / `sta_en`）に保存され、**次の起動から**有効です。両方オフにすると Wi-Fi 自体を起動せず、BLE と I2C だけで動きます（BLE は常に動くので、Web Bluetooth のページや `ble_set_wifi.py --radio` で元に戻せます）。
+
+```bash
+tools/ble_set_wifi.py --radio 'ap=0&sta=1&reboot=1'     # BLE で AP を止めて再起動
+curl -X POST 'http://192.168.1.45/radio?ap=1&sta=1'    # HTTP でも同じ。GET /radio で保存値と現在の状態
+```
+
+Web Bluetooth のページには「無線」の節にトグルと再起動ボタンがあります。AP を止めるとビーコンのベンダー IE も出なくなるので、状態は BLE 広告だけで読むことになります。
+
 ## HTTP API
 
 | パス | 内容 |
@@ -36,6 +47,8 @@ STA の IP は、接続せずに読める **状態の広告**（後述。BLE 広
 | `GET /wifi` | 登録済みの STA 接続先（パスワードは返さない） |
 | `POST /wifi?ssid=&pass=&prio=` | 接続先を追加 / 更新（同じ SSID は上書き。最大 8 件） |
 | `DELETE /wifi?ssid=` | 接続先を削除 |
+| `GET /radio` | AP / STA のオンオフ。`{"ap":true,"sta":false,"active":{...}}`（保存値と、今動いている状態） |
+| `POST /radio?ap=0|1&sta=0|1&reboot=1` | オンオフを NVS に保存（次の起動から）。`reboot=1` で再起動 |
 
 ### 画像のパラメータ（`/jpg` `/jpg_stream` と BLE で共通）
 
@@ -118,6 +131,7 @@ tools/ble_set_wifi.py --list                 # 登録一覧
 | REQ（Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0002` — `w=160&h=120&q=20&rot=90&gray=1` のように HTTP と同じクエリを書く（空でも可） |
 | DATA（Notify） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0003` — `[seq u16 LE][payload]` |
 | STATUS（Read） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0005` — 状態の JSON（`/status` の簡略版: `id`、`uptime_s`、`camera`、`busy`、`free_heap`、`ap.clients`、`sta.{configured,connected,ssid,target_ssid,ip,gw,rssi}`）。広告をスキャンできない Web Bluetooth 向け |
+| CTRL（Read / Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0006` — Write: `ap=0&sta=1` で AP / STA のオンオフを NVS に保存（次の起動から）、`reboot=1` で再起動。Read: `GET /radio` と同じ JSON |
 | WIFI（Read / Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004` — Write: `ssid=HomeAP&pass=secret&prio=10`（`POST /wifi` と同じ書式。URL エンコード）で NVS に登録 / 更新、`ssid=HomeAP&del=1` で削除。Read: 登録一覧の JSON（`GET /wifi` と同じ）。失敗は ATT エラー `0x80`（不正）/ `0x81`（8 件超）/ `0x82`（見つからない） |
 
 DATA を購読してから REQ に書くと、撮影後に通知で届きます。`seq=0` の payload は `[JPEG 全長 u32 LE][JPEG の先頭]`、以降は続き。`seq=0xFFFF` はエラーメッセージ（ASCII）です。
@@ -144,7 +158,7 @@ tools/status_scan.py wifi wlp1s0  # Wi-Fi ビーコンを読む（Linux。iw か
 | オフセット | サイズ | 内容 |
 |---|---|---|
 | 0 | 1 | ver = 1 |
-| 1 | 1 | flags: bit0 STA 接続中 / bit1 NVS に登録あり / bit2 カメラ OK / bit3 AP にクライアント有り / bit4 撮影中 |
+| 1 | 1 | flags: bit0 STA 接続中 / bit1 NVS に登録あり / bit2 カメラ OK / bit3 AP にクライアント有り / bit4 撮影中 / bit5 AP オフ / bit6 STA オフ |
 | 2 | 4 | STA の IPv4（a.b.c.d の順。未接続なら 0） |
 | 6 | 3 | STA MAC の下位 3 バイト（個体識別。macOS は BLE アドレスを隠すため） |
 | 9 | 1 | STA の RSSI (int8) |

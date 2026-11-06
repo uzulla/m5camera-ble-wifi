@@ -39,6 +39,8 @@ static const ble_uuid128_t WIFI_UUID =
     BLE_UUID128_INIT(0x04, 0x00, 0x5b, 0x8e, 0x1a, 0x7c, 0x2e, 0x9f, 0x6a, 0x4d, 0x4e, 0x0b, 0x00, 0x00, 0x3c, 0x5a);
 static const ble_uuid128_t STATUS_UUID =
     BLE_UUID128_INIT(0x05, 0x00, 0x5b, 0x8e, 0x1a, 0x7c, 0x2e, 0x9f, 0x6a, 0x4d, 0x4e, 0x0b, 0x00, 0x00, 0x3c, 0x5a);
+static const ble_uuid128_t CTRL_UUID =
+    BLE_UUID128_INIT(0x06, 0x00, 0x5b, 0x8e, 0x1a, 0x7c, 0x2e, 0x9f, 0x6a, 0x4d, 0x4e, 0x0b, 0x00, 0x00, 0x3c, 0x5a);
 
 static uint16_t s_data_handle;
 static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
@@ -102,6 +104,27 @@ static int status_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ct
     return os_mbuf_append(ctxt->om, buf, n) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
+static int ctrl_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        char buf[128];
+        int n = wifi_radio_json(buf, sizeof(buf));
+        return os_mbuf_append(ctxt->om, buf, n) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_UNLIKELY;
+    char q[64];
+    uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
+    if (len >= sizeof(q)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (ble_hs_mbuf_to_flat(ctxt->om, q, sizeof(q) - 1, &len) != 0) return BLE_ATT_ERR_UNLIKELY;
+    q[len] = 0;
+    bool reboot = false;
+    esp_err_t e = wifi_cfg_apply_radio_query(q, &reboot);
+    ESP_LOGI(TAG, "ctrl via BLE \"%s\": %s", q, esp_err_to_name(e));
+    if (e != ESP_OK) return APP_ERR_INVALID;
+    if (reboot) wifi_mgr_reboot_later();
+    return 0;
+}
+
 static const struct ble_gatt_svc_def GATT_SVCS[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -127,6 +150,11 @@ static const struct ble_gatt_svc_def GATT_SVCS[] = {
                 .uuid = &STATUS_UUID.u,
                 .access_cb = status_access,
                 .flags = BLE_GATT_CHR_F_READ,
+            },
+            {
+                .uuid = &CTRL_UUID.u,
+                .access_cb = ctrl_access,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
             },
             {0},
         },

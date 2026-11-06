@@ -24,6 +24,8 @@
 #define STATUS_F_CAMERA_OK 0x04
 #define STATUS_F_AP_CLIENTS 0x08      // AP にクライアントがいる
 #define STATUS_F_BUSY 0x10            // 撮影中
+#define STATUS_F_AP_OFF 0x20          // AP を止めている（NVS 設定）
+#define STATUS_F_STA_OFF 0x40         // STA を止めている（NVS 設定）
 #define STATUS_ADV_FIXED 14
 #define STATUS_ADV_MAX (STATUS_ADV_FIXED + 32)
 #define STATUS_ADV_PERIOD_MS 5000

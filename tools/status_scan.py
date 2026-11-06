@@ -27,6 +27,7 @@ WIFI_OUI_TYPE = 0x01
 FIXED = struct.Struct("<BB4s3sbHBB")
 
 F_STA_CONNECTED, F_STA_CONFIGURED, F_CAMERA_OK, F_AP_CLIENTS, F_BUSY = 0x01, 0x02, 0x04, 0x08, 0x10
+F_AP_OFF, F_STA_OFF = 0x20, 0x40
 
 
 @dataclass
@@ -42,7 +43,9 @@ class Status:
 
     def line(self) -> str:
         f = self.flags
-        if f & F_STA_CONNECTED:
+        if f & F_STA_OFF:
+            sta = "STA off" + ("" if f & F_AP_OFF else " (AP only, 192.168.4.1)")
+        elif f & F_STA_CONNECTED:
             sta = f"STA {self.ip} ({self.sta_rssi} dBm) \"{self.ssid}\""
         elif f & F_STA_CONFIGURED:
             sta = f"STA connecting to \"{self.ssid}\"..."
@@ -50,6 +53,7 @@ class Status:
             sta = "STA not configured (AP only, 192.168.4.1)"
         extras = [
             "camera ok" if f & F_CAMERA_OK else "NO CAMERA",
+            *(["AP off"] if f & F_AP_OFF else []),
             f"ap_clients {self.ap_clients}",
             f"heap {self.heap_kb}K",
             f"up {self.uptime_min // 60}h{self.uptime_min % 60:02d}m",

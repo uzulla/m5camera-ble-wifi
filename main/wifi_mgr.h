@@ -48,6 +48,19 @@ esp_err_t wifi_cfg_apply_query(const char *query);
 // 登録一覧の JSON（パスワードは含めない）。{"networks":[{"ssid":"..","prio":10,"secured":true},...]}。書いた長さを返す
 int wifi_cfg_list_json(char *buf, size_t cap);
 
+// ---- 無線（AP / STA）のオンオフ。NVS に保存し、起動時に反映する ----
+// 保存されている設定（既定はどちらも on）
+void wifi_cfg_radio_get(bool *ap_en, bool *sta_en);
+// 今この起動で動いている状態
+void wifi_mgr_radio_active(bool *ap_on, bool *sta_on);
+// "ap=0&sta=1&reboot=1" を解釈して保存する。reboot=1 なら *reboot を立てる（呼び出し側が応答を返してから再起動する）。
+// 戻り値: ESP_OK / ESP_ERR_INVALID_ARG（ap も sta も reboot も無い）
+esp_err_t wifi_cfg_apply_radio_query(const char *query, bool *reboot);
+// {"ap":true,"sta":false,"active":{"ap":true,"sta":true}}。保存値と現在の状態が違えば再起動で反映される
+int wifi_radio_json(char *buf, size_t cap);
+// 応答を返す時間を置いてから再起動する（約 0.7 秒後）
+void wifi_mgr_reboot_later(void);
+
 void wifi_mgr_status(wifi_sta_status_t *st);
 // NVS に STA の接続先が 1 件以上あるか
 bool wifi_mgr_sta_configured(void);

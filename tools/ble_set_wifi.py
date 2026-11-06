@@ -9,6 +9,8 @@
   tools/ble_set_wifi.py HomeAP ''                    # パスワードなしの AP
   tools/ble_set_wifi.py --del HomeAP                 # 削除
   tools/ble_set_wifi.py --list                       # 登録一覧だけ見る
+  tools/ble_set_wifi.py --radio 'ap=0&sta=1'         # AP / STA のオンオフを NVS に保存（次の起動から）。reboot=1 を足すと再起動
+  tools/ble_set_wifi.py --radio reboot=1             # 再起動だけ
 
 複数台が見えるときは --id 445566（status_scan.py が出す M5Cam-XXXXXX）で選ぶ。
 """
@@ -23,6 +25,7 @@ from bleak import BleakClient, BleakScanner
 from status_scan import COMPANY_ID, F_STA_CONFIGURED, F_STA_CONNECTED, SVC, decode
 
 WIFI = "5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004"
+CTRL = "5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0006"
 APP_ERR = {0x80: "invalid (ssid required, ssid<=32, pass<=64)", 0x81: "full (max 8 networks)", 0x82: "not found"}
 
 
@@ -83,6 +86,17 @@ async def main(argv: list[str]) -> None:
     if not argv:
         sys.exit(__doc__)
 
+    if argv[0] == "--radio":
+        dev = await find(dev_id)
+        async with BleakClient(dev) as c:
+            print(f"connected to {dev.name} ({dev.address})")
+            print("before:", (await c.read_gatt_char(CTRL)).decode(errors="replace"))
+            await c.write_gatt_char(CTRL, argv[1].encode(), response=True)
+            if "reboot=1" in argv[1]:
+                print("reboot requested; device will disconnect")
+                return
+            print("after: ", (await c.read_gatt_char(CTRL)).decode(errors="replace"))
+        return
     if argv[0] == "--list":
         payload = None
     elif argv[0] == "--del":

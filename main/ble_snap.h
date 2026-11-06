@@ -14,6 +14,9 @@
 //     Read : 登録一覧の JSON（GET /wifi と同じ。パスワードは含まない）
 //   STATUS   5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0005
 //     Read : 状態の JSON（/status の簡略版。STA の IP、接続先、カメラの可否など）。広告をスキャンできないクライアント（Web Bluetooth）向け
+//   CTRL     5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0006
+//     Write: "ap=0&sta=1" で AP / STA のオンオフを NVS に保存（次の起動から有効）、"reboot=1" で再起動（組み合わせ可）
+//     Read : {"ap":true,"sta":false,"active":{"ap":true,"sta":true}}（保存値と、今動いている状態）
 esp_err_t ble_snap_start(void);
 
 // 広告の scan response（Manufacturer Specific Data, 会社 ID 0xFFFF）に載せる状態を更新する。

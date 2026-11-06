@@ -28,6 +28,10 @@ size_t status_adv_build(uint8_t *buf, size_t cap)
     if (snap_ready()) flags |= STATUS_F_CAMERA_OK;
     if (ncl > 0) flags |= STATUS_F_AP_CLIENTS;
     if (snap_busy()) flags |= STATUS_F_BUSY;
+    bool ap_on, sta_on;
+    wifi_mgr_radio_active(&ap_on, &sta_on);
+    if (!ap_on) flags |= STATUS_F_AP_OFF;
+    if (!sta_on) flags |= STATUS_F_STA_OFF;
 
     uint32_t up_min = (uint32_t)(esp_timer_get_time() / 60000000LL);
     if (up_min > 0xFFFF) up_min = 0xFFFF;
@@ -68,16 +72,17 @@ int status_adv_json(char *buf, size_t cap)
     wifi_mgr_status(&st);
     wifi_ap_client_t cl[4];
     int ncl = wifi_mgr_ap_clients(cl, 4);
-    char ssid[80], target[80];
+    char ssid[80], target[80], radio[96];
     json_str(ssid, sizeof(ssid), st.ssid);
     json_str(target, sizeof(target), st.target_ssid);
+    wifi_radio_json(radio, sizeof(radio));
     int o = snprintf(buf, cap,
-                     "{\"id\":\"%02x%02x%02x\",\"uptime_s\":%lld,\"camera\":%s,\"busy\":%s,\"free_heap\":%u,"
+                     "{\"id\":\"%02x%02x%02x\",\"uptime_s\":%lld,\"camera\":%s,\"busy\":%s,\"free_heap\":%u,\"radio\":%s,"
                      "\"ap\":{\"ip\":\"192.168.4.1\",\"clients\":%d},"
                      "\"sta\":{\"configured\":%s,\"connected\":%s,\"ssid\":\"%s\",\"target_ssid\":\"%s\",\"ip\":\"%s\",\"gw\":\"%s\",\"rssi\":%d}}",
                      st.mac_raw[3], st.mac_raw[4], st.mac_raw[5], esp_timer_get_time() / 1000000LL,
                      snap_ready() ? "true" : "false", snap_busy() ? "true" : "false",
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), ncl,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), radio, ncl,
                      wifi_mgr_sta_configured() ? "true" : "false", st.connected ? "true" : "false",
                      ssid, target, st.ip, st.gw, st.connected ? st.rssi : 0);
     return o < (int)cap ? o : (int)cap - 1;

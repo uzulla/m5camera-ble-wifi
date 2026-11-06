@@ -173,34 +173,11 @@ IP と SSID は平文で周囲に撒かれます。AP が無パスワードな�
 
 `web/index.html` 1 枚で、状態の表示、Wi-Fi の登録 / 削除、スナップの表示ができます。アプリは不要で、Android の Chrome で開くだけです（iOS の Safari は Web Bluetooth 非対応）。
 
-Web Bluetooth は **HTTPS のページでしか動きません**（`file://` も M5Cam 自身の HTTP も不可）。公開先は 2 つあります。
+Web Bluetooth は **HTTPS のページでしか動きません**（`file://` も M5Cam 自身の HTTP も不可）。GitHub Pages で公開しています。
 
-**GitHub Pages（どこからでも開ける）**: https://uzulla.github.io/m5camera-ble-wifi/
+**GitHub Pages**: https://uzulla.github.io/m5camera-ble-wifi/
 
 `gh-pages` ブランチに `web/` の中身を置いています。ページを更新したら `main` に push した後で `tools/publish_pages.sh`（`git subtree push --prefix web origin gh-pages`）を実行してください。ページには UUID と UI しか入っておらず、機体への接続はスマホの BLE で行うので、公開しても機体には誰も届きません。
-
-**Tailscale Serve（tailnet 内だけ）**: buildhost（Tailscale IP `<buildhost の Tailscale IP>`、tailnet `<tailnet>.ts.net`）で配信します。
-
-**本来の形: Tailscale Serve（HTTPS）**
-
-```bash
-# buildhost 上。~/m5_jpg_snapshot/web は tools/sync.sh で同期される
-sudo tailscale serve --bg ~/m5_jpg_snapshot/web          # https://buildhost.<tailnet>.ts.net/
-sudo tailscale serve status
-```
-
-前提として、Tailscale の管理コンソール（https://login.tailscale.com/admin/dns）で **MagicDNS と HTTPS Certificates が有効**であること（無効だと `tailscale serve` が「your Tailscale account does not support getting TLS certs」で止まる）。buildhost では上の serve を設定済みで、`https://buildhost.<tailnet>.ts.net/` が正規の証明書で応答します。
-
-開く端末側は Tailscale に入っていて、**「Use Tailscale DNS」が有効**である必要があります（Android アプリは既定で有効。Mac の CLI で無効になっている場合は `tailscale set --accept-dns=true`）。名前が解決できないときはこれが原因です。
-
-**当面の代替: HTTP + Chrome のフラグ**
-
-HTTPS が使えない環境向けの予備として、buildhost の systemd サービス `m5cam-web.service`（`python3 -m http.server`、tailnet IP にだけ bind）が `http://<buildhost の Tailscale IP>:8080/` で同じページを配っています。不要なら止めてください。Android の Chrome で `chrome://flags/#unsafely-treat-insecure-origin-as-secure` に `http://<buildhost の Tailscale IP>:8080` を登録して Chrome を再起動すると、この URL で Web Bluetooth が使えます。自分の端末だけで使う前提なら実用になります（Android 側も Tailscale に入っていること）。
-
-```bash
-ssh buildhost sudo systemctl status m5cam-web      # 状態
-ssh buildhost sudo systemctl disable --now m5cam-web   # 止める
-```
 
 ページ側は GATT の STATUS / WIFI / REQ / DATA 特性を使っていて、Python ツールと同じ書式です。広告のスキャン（接続なしで IP を知る）は Chrome の Web Bluetooth では標準で使えないため、接続して STATUS を読む作りになっています。
 

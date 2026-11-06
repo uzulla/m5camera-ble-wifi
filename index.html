@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M5Cam BLE Client page</title>
+<style>
+  :root { --fg: #1c1c1e; --bg: #f5f5f7; --card: #fff; --line: #d9d9de; --accent: #0a66c2; --warn: #b3261e; --ok: #1b7f3a; --muted: #6e6e73; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #f2f2f7; --bg: #121214; --card: #1e1e22; --line: #3a3a40; --accent: #5aa9ff; --warn: #ff6b60; --ok: #4cc26a; --muted: #9a9aa2; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; font: 16px/1.5 system-ui, -apple-system, "Hiragino Sans", sans-serif; color: var(--fg); background: var(--bg); }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); width: 100%; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 2px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 15px; }
+  .kv b { color: var(--muted); font-weight: 500; }
+  .kv a { color: var(--accent); margin-left: 6px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .muted { color: var(--muted); }
+  ul.nets { list-style: none; padding: 0; margin: 0 0 8px; }
+  ul.nets li { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  ul.nets li:last-child { border-bottom: 0; }
+  img#pic { max-width: 100%; border-radius: 8px; display: block; margin-top: 8px; background: #000; }
+  pre#log { font-size: 12px; max-height: 160px; overflow: auto; margin: 0; white-space: pre-wrap; color: var(--muted); }
+  #unsupported { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>M5Cam BLE Client page</h1>
+  <button id="connect" class="primary">接続</button>
+  <button id="disconnect" disabled>切断</button>
+  <span id="connstate" class="muted">未接続</span>
+</header>
+
+<section id="unsupported">
+  <p class="warn">このブラウザは Web Bluetooth に対応していません。Android の Chrome で、HTTPS のページとして開いてください（iOS の Safari は非対応です）。</p>
+</section>
+
+<section>
+  <div class="row" style="justify-content:space-between;margin-bottom:8px">
+    <h2 style="margin:0">状態</h2>
+    <button id="refresh" disabled>更新</button>
+  </div>
+  <div class="kv" id="status_kv"></div>
+</section>
+
+<section>
+  <h2>Wi-Fi 接続先（NVS）</h2>
+  <ul class="nets" id="nets"><li class="muted">—</li></ul>
+  <label for="ssid">SSID</label>
+  <input id="ssid" autocapitalize="off" autocomplete="off" placeholder="HomeAP">
+  <label for="pass">パスフレーズ（なしなら空）</label>
+  <input id="pass" type="password" autocapitalize="off" autocomplete="off">
+  <label for="prio">優先度（大きいほど先に試す）</label>
+  <input id="prio" type="number" value="10" inputmode="numeric">
+  <div class="row" style="margin-top:10px">
+    <button id="setwifi" class="primary" disabled>登録して接続を待つ</button>
+    <span id="wifi_msg" class="muted"></span>
+  </div>
+</section>
+
+<section>
+  <h2>スナップ</h2>
+  <label for="q">パラメータ（/jpg と同じ）</label>
+  <input id="q" value="w=320&h=240&q=40" autocapitalize="off" autocomplete="off">
+  <div class="row" style="margin-top:10px">
+    <button id="snap" class="primary" disabled>撮影</button>
+    <span id="snap_msg" class="muted"></span>
+  </div>
+  <img id="pic" alt="" hidden>
+</section>
+
+<section>
+  <h2>ログ</h2>
+  <pre id="log"></pre>
+</section>
+
+<script>
+'use strict';
+const SVC    = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0001';
+const REQ    = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0002';
+const DATA   = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0003';
+const WIFI   = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004';
+const STATUS = '5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0005';
+
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+let device = null, ch = {};
+let snapState = null;   // {chunks: Map, total, resolve, reject, timer}
+
+function log(msg, cls) {
+  const t = new Date().toLocaleTimeString();
+  $('log').textContent = `${t} ${msg}\n` + $('log').textContent;
+}
+
+function setConnected(on) {
+  for (const id of ['disconnect', 'refresh', 'setwifi', 'snap']) $(id).disabled = !on;
+  $('connect').disabled = on;
+  $('connstate').textContent = on ? `接続中: ${device.name}` : '未接続';
+  $('connstate').className = on ? 'ok' : 'muted';
+}
+
+if (!navigator.bluetooth) {
+  $('unsupported').style.display = 'block';
+  $('connect').disabled = true;
+}
+
+// ---- 接続 ----
+$('connect').onclick = async () => {
+  try {
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    device.addEventListener('gattserverdisconnected', () => { log('切断されました'); setConnected(false); ch = {}; });
+    log(`接続中: ${device.name}`);
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+    for (const [k, u] of Object.entries({ req: REQ, data: DATA, wifi: WIFI, status: STATUS })) ch[k] = await svc.getCharacteristic(u);
+    ch.data.addEventListener('characteristicvaluechanged', onData);
+    await ch.data.startNotifications();
+    setConnected(true);
+    log('接続しました');
+    await refreshStatus();
+    await refreshWifi();
+  } catch (e) {
+    log(`接続失敗: ${e.message}`);
+  }
+};
+$('disconnect').onclick = () => device?.gatt?.disconnect();
+
+// ---- 状態 ----
+async function readJson(c) {
+  return JSON.parse(dec.decode(await c.readValue()));
+}
+
+async function refreshStatus() {
+  const s = await readJson(ch.status);
+  const open = ip => `<a href="http://${esc(ip)}/" target="_blank" rel="noopener">open</a>`;
+  const apOff = s.radio && !s.radio.active.ap, staOff = s.radio && !s.radio.active.sta;
+  let ap, sta;
+  if (apOff) ap = '<span class="muted">オフ</span>';
+  else ap = `192.168.4.1${open('192.168.4.1')}  <span class="muted">クライアント ${s.ap.clients}</span>`;
+  if (staOff) sta = '<span class="muted">オフ</span>';
+  else if (s.sta.connected) sta = `<span class="ok">${esc(s.sta.ip)}</span>${open(s.sta.ip)}  <span class="muted">${esc(s.sta.ssid)}  ${s.sta.rssi} dBm  GW ${esc(s.sta.gw)}</span>`;
+  else if (s.sta.configured) sta = `<span class="warn">"${esc(s.sta.target_ssid)}" に接続中…</span>`;
+  else sta = '<span class="warn">未設定</span>';
+  const rows = [
+    ['機体', esc(`M5Cam-${s.id}`)],
+    ['AP', ap],
+    ['STA', sta],
+    ['カメラ', esc((s.camera ? 'OK' : 'なし') + (s.busy ? '（撮影中）' : ''))],
+    ['稼働', esc(`${Math.floor(s.uptime_s / 3600)}h${String(Math.floor(s.uptime_s / 60) % 60).padStart(2, '0')}m`)],
+    ['空きヒープ', esc(`${Math.round(s.free_heap / 1024)} KiB`)],
+  ];
+  $('status_kv').innerHTML = rows.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join('');
+  return s;
+}
+$('refresh').onclick = () => refreshStatus().catch(e => log(`状態の取得に失敗: ${e.message}`));
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// ---- Wi-Fi ----
+async function refreshWifi() {
+  const j = await readJson(ch.wifi);
+  const ul = $('nets');
+  ul.innerHTML = '';
+  if (!j.networks.length) ul.innerHTML = '<li class="muted">登録なし</li>';
+  for (const n of j.networks) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${esc(n.ssid)} <span class="muted">prio ${n.prio}${n.secured ? '' : ' / open'}</span></span>`;
+    const del = document.createElement('button');
+    del.textContent = '削除';
+    del.onclick = () => wifiWrite(`ssid=${encodeURIComponent(n.ssid)}&del=1`, `"${n.ssid}" を削除しました`);
+    li.appendChild(del);
+    ul.appendChild(li);
+  }
+}
+
+async function wifiWrite(q, okMsg) {
+  try {
+    await ch.wifi.writeValueWithResponse(enc.encode(q));
+    log(okMsg); $('wifi_msg').textContent = okMsg;
+    await refreshWifi();
+    return true;
+  } catch (e) {
+    // ATT のアプリ固有エラー（0x80 不正 / 0x81 8 件超 / 0x82 見つからない）はブラウザでは区別できない
+    const m = `失敗: ${e.message}（SSID は 32 文字、パスフレーズは 64 文字まで。最大 8 件）`;
+    log(m); $('wifi_msg').textContent = m;
+    return false;
+  }
+}
+
+$('setwifi').onclick = async () => {
+  const ssid = $('ssid').value.trim(), pass = $('pass').value, prio = parseInt($('prio').value || '0', 10);
+  if (!ssid) { $('wifi_msg').textContent = 'SSID を入れてください'; return; }
+  $('setwifi').disabled = true;
+  try {
+    const ok = await wifiWrite(`ssid=${encodeURIComponent(ssid)}&pass=${encodeURIComponent(pass)}&prio=${prio}`, `"${ssid}" を保存しました`);
+    if (!ok) return;
+    // 繋がるまで状態を読み続ける（最長 45 秒）
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const s = await refreshStatus();
+      if (s.sta.connected) { $('wifi_msg').textContent = `接続しました: ${s.sta.ip}`; log(`STA ${s.sta.ip}`); return; }
+      $('wifi_msg').textContent = `接続待ち… (${(i + 1) * 3}s)`;
+    }
+    $('wifi_msg').textContent = 'まだ接続できていません（パスフレーズ違い、または電波が届かない可能性）。「更新」で再確認できます';
+  } catch (e) {
+    log(`失敗: ${e.message}`);
+  } finally {
+    $('setwifi').disabled = false;
+  }
+};
+
+// ---- スナップ ----
+function onData(ev) {
+  if (!snapState) return;
+  const v = ev.target.value;
+  const seq = v.getUint16(0, true);
+  if (seq === 0xFFFF) {
+    snapState.reject(new Error(dec.decode(new Uint8Array(v.buffer, v.byteOffset + 2, v.byteLength - 2))));
+    return;
+  }
+  let off = 2;
+  if (seq === 0) { snapState.total = v.getUint32(2, true); off = 6; }
+  snapState.chunks.set(seq, new Uint8Array(v.buffer.slice(v.byteOffset + off, v.byteOffset + v.byteLength)));
+  snapState.got += v.byteLength - off;
+  $('snap_msg').textContent = `受信中 ${snapState.got} / ${snapState.total || '?'} bytes`;
+  if (snapState.total && snapState.got >= snapState.total) snapState.resolve();
+}
+
+$('snap').onclick = async () => {
+  $('snap').disabled = true;
+  const t0 = performance.now();
+  try {
+    const done = new Promise((resolve, reject) => {
+      snapState = { chunks: new Map(), total: 0, got: 0, resolve, reject };
+      snapState.timer = setTimeout(() => reject(new Error('タイムアウト')), 60000);
+    });
+    await ch.req.writeValueWithResponse(enc.encode($('q').value.trim()));
+    await done;
+    clearTimeout(snapState.timer);
+    const parts = [...snapState.chunks.keys()].sort((a, b) => a - b).map(k => snapState.chunks.get(k));
+    const blob = new Blob(parts, { type: 'image/jpeg' });
+    const url = URL.createObjectURL(blob);
+    const img = $('pic');
+    if (img.src) URL.revokeObjectURL(img.src);
+    img.src = url; img.hidden = false;
+    const dt = (performance.now() - t0) / 1000;
+    $('snap_msg').textContent = `${blob.size} bytes, ${dt.toFixed(1)} s (${(blob.size / dt / 1024).toFixed(1)} KiB/s)`;
+    log(`スナップ ${blob.size} bytes`);
+  } catch (e) {
+    $('snap_msg').textContent = `失敗: ${e.message}`;
+    log(`スナップ失敗: ${e.message}`);
+  } finally {
+    if (snapState) clearTimeout(snapState.timer);
+    snapState = null;
+    $('snap').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

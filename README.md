@@ -173,7 +173,13 @@ IP と SSID は平文で周囲に撒かれます。AP が無パスワードな�
 
 `web/index.html` 1 枚で、状態の表示、Wi-Fi の登録 / 削除、スナップの表示ができます。アプリは不要で、Android の Chrome で開くだけです（iOS の Safari は Web Bluetooth 非対応）。
 
-Web Bluetooth は **HTTPS のページでしか動きません**（`file://` も M5Cam 自身の HTTP も不可）。配信は buildhost（Tailscale IP `<buildhost の Tailscale IP>`、tailnet `<tailnet>.ts.net`）で行います。
+Web Bluetooth は **HTTPS のページでしか動きません**（`file://` も M5Cam 自身の HTTP も不可）。公開先は 2 つあります。
+
+**GitHub Pages（どこからでも開ける）**: https://uzulla.github.io/m5camera-ble-wifi/
+
+`gh-pages` ブランチに `web/` の中身を置いています。ページを更新したら `main` に push した後で `tools/publish_pages.sh`（`git subtree push --prefix web origin gh-pages`）を実行してください。ページには UUID と UI しか入っておらず、機体への接続はスマホの BLE で行うので、公開しても機体には誰も届きません。
+
+**Tailscale Serve（tailnet 内だけ）**: buildhost（Tailscale IP `<buildhost の Tailscale IP>`、tailnet `<tailnet>.ts.net`）で配信します。
 
 **本来の形: Tailscale Serve（HTTPS）**
 
@@ -237,7 +243,7 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 | `web/index.html` | Web Bluetooth のページ（Android の Chrome 向け。状態・Wi-Fi 登録・スナップ） |
 | `docs/i2c.md` | I2C の開発者向け資料 |
 | `examples/powerhub_i2c_master/` | I2C マスターのサンプル（PowerHub / ESP-IDF） |
-| `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py`、`status_scan.py`（状態の広告を読む）、`ble_set_wifi.py`（BLE で Wi-Fi を登録） |
+| `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py`、`status_scan.py`（状態の広告を読む）、`ble_set_wifi.py`（BLE で Wi-Fi を登録）、`publish_pages.sh`（web/ を GitHub Pages へ） |
 
 側面のボタンは EN（リセット）で、ソフトからは読めません。回路図上もスイッチはこれ 1 つです。
 

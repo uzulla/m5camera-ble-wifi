@@ -120,7 +120,7 @@ function log(msg, cls) {
 function setConnected(on) {
   for (const id of ['disconnect', 'refresh', 'setwifi', 'snap', 'radio_save', 'reboot']) $(id).disabled = !on;
   $('connect').disabled = on;
-  $('connstate').textContent = on ? `接続中: ${device.name}` : '未接続';
+  $('connstate').textContent = on ? `接続中: ${device.name}` : '未接続';   // 状態を読んだら機体 ID と MAC に置き換える
   $('connstate').className = on ? 'ok' : 'muted';
 }
 
@@ -158,6 +158,7 @@ async function readJson(c) {
 
 async function refreshStatus() {
   const s = await readJson(ch.status);
+  $('connstate').textContent = `接続中: M5Cam-${s.id}  ${s.mac}`;
   const open = ip => `<a href="http://${esc(ip)}/" target="_blank" rel="noopener">open</a>`;
   const apOff = s.radio && !s.radio.active.ap, staOff = s.radio && !s.radio.active.sta;
   let ap, sta;
@@ -168,7 +169,7 @@ async function refreshStatus() {
   else if (s.sta.configured) sta = `<span class="warn">"${esc(s.sta.target_ssid)}" に接続中…</span>`;
   else sta = '<span class="warn">未設定</span>';
   const rows = [
-    ['機体', esc(`M5Cam-${s.id}`)],
+    ['機体', esc(`M5Cam-${s.id}  STA MAC ${s.mac}`)],
     ['AP', ap],
     ['STA', sta],
     ['カメラ', esc((s.camera ? 'OK' : 'なし') + (s.busy ? '（撮影中）' : ''))],

@@ -77,10 +77,10 @@ int status_adv_json(char *buf, size_t cap)
     json_str(target, sizeof(target), st.target_ssid);
     wifi_radio_json(radio, sizeof(radio));
     int o = snprintf(buf, cap,
-                     "{\"id\":\"%02x%02x%02x\",\"uptime_s\":%lld,\"camera\":%s,\"busy\":%s,\"free_heap\":%u,\"radio\":%s,"
+                     "{\"id\":\"%02x%02x%02x\",\"mac\":\"%s\",\"uptime_s\":%lld,\"camera\":%s,\"busy\":%s,\"free_heap\":%u,\"radio\":%s,"
                      "\"ap\":{\"ip\":\"192.168.4.1\",\"clients\":%d},"
                      "\"sta\":{\"configured\":%s,\"connected\":%s,\"ssid\":\"%s\",\"target_ssid\":\"%s\",\"ip\":\"%s\",\"gw\":\"%s\",\"rssi\":%d}}",
-                     st.mac_raw[3], st.mac_raw[4], st.mac_raw[5], esp_timer_get_time() / 1000000LL,
+                     st.mac_raw[3], st.mac_raw[4], st.mac_raw[5], st.mac, esp_timer_get_time() / 1000000LL,
                      snap_ready() ? "true" : "false", snap_busy() ? "true" : "false",
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), radio, ncl,
                      wifi_mgr_sta_configured() ? "true" : "false", st.connected ? "true" : "false",

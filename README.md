@@ -130,7 +130,7 @@ tools/ble_set_wifi.py --list                 # 登録一覧
 | Service | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0001` |
 | REQ（Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0002` — `w=160&h=120&q=20&rot=90&gray=1` のように HTTP と同じクエリを書く（空でも可） |
 | DATA（Notify） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0003` — `[seq u16 LE][payload]` |
-| STATUS（Read） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0005` — 状態の JSON（`/status` の簡略版: `id`、`uptime_s`、`camera`、`busy`、`free_heap`、`ap.clients`、`sta.{configured,connected,ssid,target_ssid,ip,gw,rssi}`）。広告をスキャンできない Web Bluetooth 向け |
+| STATUS（Read） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0005` — 状態の JSON（`/status` の簡略版: `id`、`mac`（STA の MAC）、`uptime_s`、`camera`、`busy`、`free_heap`、`ap.clients`、`sta.{configured,connected,ssid,target_ssid,ip,gw,rssi}`）。広告をスキャンできない Web Bluetooth 向け |
 | CTRL（Read / Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0006` — Write: `ap=0&sta=1` で AP / STA のオンオフを NVS に保存（次の起動から）、`reboot=1` で再起動。Read: `GET /radio` と同じ JSON |
 | WIFI（Read / Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004` — Write: `ssid=HomeAP&pass=secret&prio=10`（`POST /wifi` と同じ書式。URL エンコード）で NVS に登録 / 更新、`ssid=HomeAP&del=1` で削除。Read: 登録一覧の JSON（`GET /wifi` と同じ）。失敗は ATT エラー `0x80`（不正）/ `0x81`（8 件超）/ `0x82`（見つからない） |
 

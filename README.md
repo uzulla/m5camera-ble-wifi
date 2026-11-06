@@ -3,7 +3,7 @@
 M5Stack の **M5Camera**（ESP32 / OV2640 / PSRAM 4MB / CP2104）で、Wi-Fi（AP + STA）と BLE から JPEG のスナップ・ストリームを取得するファームウェアです。
 
 - ビルド環境: ESP-IDF v6.1（buildhost の `~/esp/esp-idf-v6.1`）。`esp32-camera` はコンポーネントマネージャが取得します。
-- 作業場所: ローカルの `m5_jpg_snapshot/` が正で、buildhost の `~/m5_jpg_snapshot/` に同期してビルド・書き込みします。
+- 作業場所: ローカルの `m5_jpg_snapshot/` が正で、ビルド機（この README では `buildhost` と書く。実際のホスト名は環境変数 `HOST` か、リポジトリ直下の `.synchost`（git 管理外）に書く）の `~/m5_jpg_snapshot/` に同期してビルド・書き込みします。
 
 ```bash
 tools/sync.sh          # buildhost に同期のみ

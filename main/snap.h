@@ -29,6 +29,8 @@ typedef struct {
 
 esp_err_t snap_init(void);
 bool snap_ready(void);
+// 撮影（native / soft）の実行中か
+bool snap_busy(void);
 
 void snap_params_default(snap_params_t *p, int w, int h, int q);
 // "w=100&h=100&q=20&rot=90&gray=1" 形式を p に上書きで反映する。不正なら ESP_ERR_INVALID_ARG と err にメッセージ

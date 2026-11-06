@@ -21,7 +21,7 @@ tools/sync.sh flash    # 同期してビルド・書き込み（PORT=/dev/ttyUSB
 | STA | NVS に登録した Wi-Fi に接続。**複数登録でき、Priority の大きい順に試し、失敗したら次へフォールバック** |
 
 STA が切れると、Priority の先頭から試し直します。接続中に登録を変更したときも同様です。AP のチャンネルは STA の接続先に追従します（ESP32 の仕様）。
-STA の IP は `/status` かシリアルログ（`STA got IP`）で分かります。
+STA の IP は、接続せずに読める **状態の広告**（後述。BLE 広告と AP ビーコンに載せている）、`/status`、シリアルログ（`STA got IP`）のいずれかで分かります。
 
 > AP はパスワードなしで、`/wifi` も認証なしです。信頼できる場所でのみ使ってください。
 
@@ -114,6 +114,35 @@ DATA を購読してから REQ に書くと、撮影後に通知で届きます�
 tools/ble_snap.py out.jpg "w=96&h=96&q=0&gray=1"   # macOS / Linux。uv が bleak を入れる
 ```
 
+## 状態の広告（BLE 広告 / Wi-Fi ビーコン）
+
+画面がない機体の状態（STA の IP、接続先、カメラの可否など）を、**接続せずに読める場所**に 5 秒ごとに載せています。
+
+- **BLE 広告の scan response**: Manufacturer Specific Data（会社 ID `0xFFFF`）。GATT 接続中も接続不可の広告（ADV_SCAN_IND、500〜1000ms 間隔）で見え続けます
+- **AP のビーコン / probe response**: ベンダー固有 IE（OUI `5a:3c:00`、type `0x01`）。AP を再起動せずに差し替えています
+
+```bash
+tools/status_scan.py              # BLE をスキャン（macOS / Linux。uv が bleak を入れる）
+tools/status_scan.py wifi wlp1s0  # Wi-Fi ビーコンを読む（Linux。iw か iwlist（wireless-tools）。root でなければ sudo -n）
+# [BLE -54 dBm] M5Cam-445566  STA 192.168.1.23 (-58 dBm) "HomeAP"  |  camera ok  ap_clients 0  heap 51K  up 0h03m
+```
+
+バイト列（BLE では 27 バイトに切るので SSID は 13 バイトまで。Wi-Fi は SSID 全長）:
+
+| オフセット | サイズ | 内容 |
+|---|---|---|
+| 0 | 1 | ver = 1 |
+| 1 | 1 | flags: bit0 STA 接続中 / bit1 NVS に登録あり / bit2 カメラ OK / bit3 AP にクライアント有り / bit4 撮影中 |
+| 2 | 4 | STA の IPv4（a.b.c.d の順。未接続なら 0） |
+| 6 | 3 | STA MAC の下位 3 バイト（個体識別。macOS は BLE アドレスを隠すため） |
+| 9 | 1 | STA の RSSI (int8) |
+| 10 | 2 | 稼働時間（分, u16 LE） |
+| 12 | 1 | 空き内部ヒープ (KiB) |
+| 13 | 1 | AP に接続中のクライアント数 |
+| 14 | 可変 | SSID（接続中はその SSID、未接続なら接続を試みている SSID） |
+
+IP と SSID は平文で周囲に撒かれます。AP が無パスワードなのと同じく、信頼できる場所で使う前提です。
+
 ## I2C（他のマイコンから取得）
 
 Grove ポート（**SDA=IO4, SCL=IO13**）の I2C スレーブ（7bit アドレス `0x42`）として動作します。カメラの SCCB（IO22/23）とは別のバスです。
@@ -146,11 +175,12 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 | `main/snap.c` | カメラ初期化、パラメータ解析、native / soft の撮影 |
 | `main/wifi_mgr.c` | AP + STA、NVS の接続先管理、優先度フォールバック |
 | `main/http_srv.c` | HTTP サーバー（ストリームは別タスクで配信し、他のリクエストを塞がない） |
-| `main/ble_snap.c` | NimBLE の GATT サービス |
+| `main/ble_snap.c` | NimBLE の GATT サービス、広告（scan response に状態） |
+| `main/status_adv.c` | 状態のバイト列を組み立て、BLE 広告と AP のベンダー IE に反映 |
 | `main/i2c_snap.c` | I2C スレーブ（他のマイコンからの取得） |
 | `main/cpu_mon.c` | FreeRTOS の実行時間統計から CPU 使用率を算出 |
 | `docs/i2c.md` | I2C の開発者向け資料 |
 | `examples/powerhub_i2c_master/` | I2C マスターのサンプル（PowerHub / ESP-IDF） |
-| `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py` |
+| `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py`、`status_scan.py`（状態の広告を読む） |
 
 カメラのピン: XCLK 27 / SIOD 22 / SIOC 23 / VSYNC 25 / HREF 26 / PCLK 21 / RESET 15 / D0〜D7 = 32, 35, 34, 5, 39, 18, 36, 19。

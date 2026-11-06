@@ -7,6 +7,7 @@
 #include "http_srv.h"
 #include "i2c_snap.h"
 #include "snap.h"
+#include "status_adv.h"
 #include "wifi_mgr.h"
 
 static const char *TAG = "main";
@@ -34,5 +35,6 @@ void app_main(void)
     ESP_ERROR_CHECK(http_start());
     if (ble_snap_start() != ESP_OK) ESP_LOGE(TAG, "BLE failed to start");
     if (i2c_snap_start() != ESP_OK) ESP_LOGE(TAG, "I2C slave failed to start");
+    if (status_adv_start() != ESP_OK) ESP_LOGE(TAG, "status broadcast failed to start");
     ESP_LOGI(TAG, "ready");
 }

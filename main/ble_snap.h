@@ -9,3 +9,7 @@
 //     seq=1..   : payload = JPEG の続き
 //     seq=0xFFFF: payload = エラーメッセージ（ASCII）
 esp_err_t ble_snap_start(void);
+
+// 広告の scan response（Manufacturer Specific Data, 会社 ID 0xFFFF）に載せる状態を更新する。
+// 27 バイトを超える分は切る。広告中なら止めて差し替えて再開する（接続には影響しない）
+void ble_snap_set_status(const uint8_t *payload, size_t len);

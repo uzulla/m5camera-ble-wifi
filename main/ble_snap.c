@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "host/ble_hs.h"
 #include "host/util/util.h"
@@ -35,6 +36,13 @@ static bool s_subscribed;
 static uint16_t s_mtu = 23;
 static uint8_t s_own_addr_type;
 static QueueHandle_t s_q;
+static bool s_synced;
+static SemaphoreHandle_t s_adv_lock;   // advertise() は host タスクと status_adv タスクの両方から呼ばれる
+
+// scan response: [会社 ID 0xFFFF (LE)][状態 payload ≤27]。AD ヘッダ 2 を足して 31 バイトに収める
+#define MFG_MAX 29
+static uint8_t s_mfg[MFG_MAX] = {0xFF, 0xFF};
+static uint8_t s_mfg_len;
 
 static void advertise(void);
 
@@ -89,6 +97,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
                 .itvl_min = 6, .itvl_max = 12, .latency = 0, .supervision_timeout = 400,
             };
             ble_gap_update_params(s_conn, &up);
+            // 接続中も状態が見えるように、接続不可（ADV_SCAN_IND）で広告を続ける
+            advertise();
         } else {
             advertise();
         }
@@ -117,6 +127,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
 
 static void advertise(void)
 {
+    xSemaphoreTake(s_adv_lock, portMAX_DELAY);
+    ble_gap_adv_stop();   // 広告中なら止める（未広告なら BLE_HS_EALREADY が返るだけ）
     struct ble_hs_adv_fields f = {0};
     f.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     f.name = (uint8_t *)DEV_NAME;
@@ -126,18 +138,44 @@ static void advertise(void)
     f.num_uuids128 = 1;
     f.uuids128_is_complete = 1;
     int rc = ble_gap_adv_set_fields(&f);
-    if (rc) { ESP_LOGE(TAG, "adv_set_fields %d", rc); return; }
-    struct ble_gap_adv_params ap = {.conn_mode = BLE_GAP_CONN_MODE_UND, .disc_mode = BLE_GAP_DISC_MODE_GEN};
+    if (rc) { ESP_LOGE(TAG, "adv_set_fields %d", rc); xSemaphoreGive(s_adv_lock); return; }
+    if (s_mfg_len) {
+        struct ble_hs_adv_fields r = {0};
+        r.mfg_data = s_mfg;
+        r.mfg_data_len = s_mfg_len;
+        rc = ble_gap_adv_rsp_set_fields(&r);
+        if (rc) ESP_LOGE(TAG, "adv_rsp_set_fields %d", rc);
+    }
+    bool connected = s_conn != BLE_HS_CONN_HANDLE_NONE;
+    struct ble_gap_adv_params ap = {
+        .conn_mode = connected ? BLE_GAP_CONN_MODE_NON : BLE_GAP_CONN_MODE_UND,
+        .disc_mode = BLE_GAP_DISC_MODE_GEN,
+    };
+    if (connected) {
+        // GATT の転送を邪魔しないよう、接続中はゆっくり広告する
+        ap.itvl_min = BLE_GAP_ADV_ITVL_MS(500);
+        ap.itvl_max = BLE_GAP_ADV_ITVL_MS(1000);
+    }
     rc = ble_gap_adv_start(s_own_addr_type, NULL, BLE_HS_FOREVER, &ap, gap_event, NULL);
     if (rc) ESP_LOGE(TAG, "adv_start %d", rc);
+    xSemaphoreGive(s_adv_lock);
 }
 
 static void on_sync(void)
 {
     ble_hs_util_ensure_addr(0);
     ble_hs_id_infer_auto(0, &s_own_addr_type);
+    s_synced = true;
     advertise();
     ESP_LOGI(TAG, "advertising as \"%s\"", DEV_NAME);
+}
+
+void ble_snap_set_status(const uint8_t *payload, size_t len)
+{
+    if (len > MFG_MAX - 2) len = MFG_MAX - 2;
+    memcpy(s_mfg + 2, payload, len);
+    s_mfg_len = 2 + len;
+    if (s_synced) advertise();
 }
 
 static void host_task(void *arg)
@@ -216,6 +254,7 @@ static void worker(void *arg)
 esp_err_t ble_snap_start(void)
 {
     s_q = xQueueCreate(2, REQ_MAX + 1);
+    s_adv_lock = xSemaphoreCreateMutex();
     esp_err_t e = nimble_port_init();
     if (e != ESP_OK) return e;
     ble_hs_cfg.sync_cb = on_sync;

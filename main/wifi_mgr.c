@@ -26,6 +26,8 @@ static const char *TAG = "wifi";
 static EventGroupHandle_t s_ev;
 static esp_netif_t *s_sta_netif;
 static esp_netif_t *s_ap_netif;
+static volatile int s_cfg_n;            // NVS の登録件数（sta_task が更新）
+static char s_target_ssid[33];          // 接続を試みている SSID
 
 // ---- NVS: ssid<i> / pass<i> / prio<i> (i = 0..7) ----
 
@@ -149,7 +151,9 @@ static void sta_task(void *arg)
     wifi_entry_t list[WIFI_MAX_ENTRIES];
     for (;;) {
         int n = wifi_cfg_list(list, WIFI_MAX_ENTRIES);
+        s_cfg_n = n;
         if (n == 0) {
+            s_target_ssid[0] = 0;
             ESP_LOGI(TAG, "no STA credentials in NVS; AP only");
             xEventGroupWaitBits(s_ev, BIT_CFG_CHANGED, pdTRUE, pdFALSE, portMAX_DELAY);
             continue;
@@ -161,6 +165,7 @@ static void sta_task(void *arg)
         for (int i = 0; i < n && !connected; i++) {
             ESP_LOGI(TAG, "STA: trying \"%s\" (prio %d)", list[i].ssid, list[i].prio);
             wifi_config_t c = {0};
+            strlcpy(s_target_ssid, list[i].ssid, sizeof(s_target_ssid));
             strlcpy((char *)c.sta.ssid, list[i].ssid, sizeof(c.sta.ssid));
             strlcpy((char *)c.sta.password, list[i].pass, sizeof(c.sta.password));
             c.sta.threshold.authmode = list[i].pass[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
@@ -193,7 +198,11 @@ void wifi_mgr_status(wifi_sta_status_t *st)
 {
     memset(st, 0, sizeof(*st));
     uint8_t mac[6];
-    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) snprintf(st->mac, sizeof(st->mac), MACSTR, MAC2STR(mac));
+    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+        snprintf(st->mac, sizeof(st->mac), MACSTR, MAC2STR(mac));
+        memcpy(st->mac_raw, mac, 6);
+    }
+    strlcpy(st->target_ssid, s_target_ssid, sizeof(st->target_ssid));
     wifi_ap_record_t ap;
     esp_netif_ip_info_t ip;
     if ((xEventGroupGetBits(s_ev) & BIT_GOT_IP) && esp_wifi_sta_get_ap_info(&ap) == ESP_OK &&
@@ -201,10 +210,42 @@ void wifi_mgr_status(wifi_sta_status_t *st)
         st->connected = true;
         strlcpy(st->ssid, (char *)ap.ssid, sizeof(st->ssid));
         st->rssi = ap.rssi;
+        st->ip_raw = ip.ip.addr;
         snprintf(st->ip, sizeof(st->ip), IPSTR, IP2STR(&ip.ip));
         snprintf(st->netmask, sizeof(st->netmask), IPSTR, IP2STR(&ip.netmask));
         snprintf(st->gw, sizeof(st->gw), IPSTR, IP2STR(&ip.gw));
     }
+}
+
+bool wifi_mgr_sta_configured(void) { return s_cfg_n > 0; }
+
+// ---- ベンダー固有 IE（状態の広告）----
+
+#define VND_OUI0 0x5a
+#define VND_OUI1 0x3c
+#define VND_OUI2 0x00
+#define VND_TYPE 0x01
+#define VND_MAX_PAYLOAD 251
+
+esp_err_t wifi_mgr_set_status_ie(const uint8_t *payload, size_t len)
+{
+    if (len > VND_MAX_PAYLOAD) return ESP_ERR_INVALID_SIZE;
+    static uint8_t buf[sizeof(vendor_ie_data_t) + VND_MAX_PAYLOAD];
+    vendor_ie_data_t *ie = (vendor_ie_data_t *)buf;
+    ie->element_id = WIFI_VENDOR_IE_ELEMENT_ID;
+    ie->length = 4 + len;
+    ie->vendor_oui[0] = VND_OUI0;
+    ie->vendor_oui[1] = VND_OUI1;
+    ie->vendor_oui[2] = VND_OUI2;
+    ie->vendor_oui_type = VND_TYPE;
+    memcpy(ie->payload, payload, len);
+    // 同じスロットに enable=true で再設定しても置き換わらないので、いったん外してから載せる
+    esp_wifi_set_vendor_ie(false, WIFI_VND_IE_TYPE_BEACON, WIFI_VND_IE_ID_0, NULL);
+    esp_wifi_set_vendor_ie(false, WIFI_VND_IE_TYPE_PROBE_RESP, WIFI_VND_IE_ID_0, NULL);
+    esp_err_t e = esp_wifi_set_vendor_ie(true, WIFI_VND_IE_TYPE_BEACON, WIFI_VND_IE_ID_0, ie);
+    if (e == ESP_OK) e = esp_wifi_set_vendor_ie(true, WIFI_VND_IE_TYPE_PROBE_RESP, WIFI_VND_IE_ID_0, ie);
+    if (e != ESP_OK) ESP_LOGW(TAG, "set_vendor_ie: %s", esp_err_to_name(e));
+    return e;
 }
 
 void wifi_mgr_ap_mac(char *buf)

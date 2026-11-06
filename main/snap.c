@@ -54,6 +54,7 @@ static const fsize_t SIZES[] = {
 
 static SemaphoreHandle_t s_lock;
 static bool s_ready;
+static volatile bool s_busy;
 static struct { int fs, q, flip; } s_cur = {-1, -1, -1};
 
 void snap_params_default(snap_params_t *p, int w, int h, int q)
@@ -148,6 +149,7 @@ esp_err_t snap_init(void)
 }
 
 bool snap_ready(void) { return s_ready; }
+bool snap_busy(void) { return s_busy; }
 
 static int pick_size(int w, int h)
 {
@@ -288,7 +290,9 @@ esp_err_t snap_capture(const snap_params_t *p, snap_t *out, char *err, size_t er
     bool native = !p->gray && (p->rot == 0 || p->rot == 180) && idx >= 0 &&
                   SIZES[idx].w == p->w && SIZES[idx].h == p->h;
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_busy = true;
     esp_err_t e = native ? capture_native(p, idx, out, err, errlen) : capture_soft(p, out, err, errlen);
+    s_busy = false;
     xSemaphoreGive(s_lock);
     return e;
 }

@@ -132,7 +132,8 @@ if (!navigator.bluetooth) {
 // ---- 接続 ----
 $('connect').onclick = async () => {
   try {
-    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    // 広告名は M5Cam-XXXXXX（サービス UUID は広告に載っていないので名前で探し、optionalServices で許可する）
+    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'M5Cam' }], optionalServices: [SVC] });
     device.addEventListener('gattserverdisconnected', () => { log('切断されました'); setConnected(false); ch = {}; });
     log(`接続中: ${device.name}`);
     const server = await device.gatt.connect();

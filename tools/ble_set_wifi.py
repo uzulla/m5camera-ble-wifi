@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 from bleak import BleakClient, BleakScanner
 
-from status_scan import COMPANY_ID, F_STA_CONFIGURED, F_STA_CONNECTED, SVC, decode
+from status_scan import COMPANY_ID, F_STA_CONFIGURED, F_STA_CONNECTED, decode, is_m5cam
 
 WIFI = "5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004"
 CTRL = "5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0006"
@@ -36,7 +36,7 @@ def status_of(ad):
 
 async def find(dev_id: str | None, timeout: float = 15):
     def ok(d, ad):
-        if SVC not in [u.lower() for u in ad.service_uuids]:
+        if not is_m5cam(d, ad):
             return False
         if dev_id is None:
             return True

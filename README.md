@@ -123,7 +123,7 @@ tools/ble_set_wifi.py --list                 # 登録一覧
 
 ## BLE
 
-デバイス名 `M5Cam`。低速（実測 5〜15 KiB/s）ですが、小さい画像なら 1 秒以内で取れます。
+広告名は `M5Cam-XXXXXX`（XXXXXX は STA MAC の下位 3 バイト。例 `M5Cam-445566`）で、複数台を見分けられます。サービス UUID は広告に載せていない（名前と状態の広告で 62 バイトを使い切るため）ので、クライアントは名前の前方一致 `M5Cam` で探してください（GATT のサービス探索は広告と無関係にできます。Web Bluetooth は `namePrefix` + `optionalServices`）。低速（実測 5〜15 KiB/s）ですが、小さい画像なら 1 秒以内で取れます。
 
 | | UUID |
 |---|---|

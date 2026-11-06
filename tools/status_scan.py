@@ -21,6 +21,12 @@ import time
 from dataclasses import dataclass
 
 SVC = "5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0001"
+NAME_PREFIX = "M5Cam"
+
+
+def is_m5cam(dev, ad) -> bool:
+    """広告名 M5Cam-XXXXXX（旧ファームは名前 M5Cam + サービス UUID）"""
+    return (dev.name or ad.local_name or "").startswith(NAME_PREFIX) or SVC in [u.lower() for u in ad.service_uuids]
 COMPANY_ID = 0xFFFF
 WIFI_OUI = "5a:3c:00"
 WIFI_OUI_TYPE = 0x01
@@ -77,7 +83,7 @@ async def scan_ble(seconds: float) -> None:
     found: dict[str, tuple[Status, int]] = {}
 
     def on_adv(dev, ad):
-        if SVC not in [u.lower() for u in ad.service_uuids]:
+        if not is_m5cam(dev, ad):
             return
         raw = ad.manufacturer_data.get(COMPANY_ID)
         st = decode(raw) if raw else None

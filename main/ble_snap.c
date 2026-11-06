@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -19,7 +20,7 @@
 
 static const char *TAG = "ble";
 
-#define DEV_NAME "M5Cam"
+#define DEV_NAME "M5Cam"   // 広告名は "M5Cam-" + STA MAC 下位 3 バイト（例 M5Cam-445566）。複数台を見分けるため
 #define BLE_DEF_W 160
 #define BLE_DEF_H 120
 #define BLE_DEF_Q 20
@@ -49,6 +50,7 @@ static uint16_t s_mtu = 23;
 static uint8_t s_own_addr_type;
 static QueueHandle_t s_q;
 static bool s_synced;
+static char s_name[16] = DEV_NAME;
 static SemaphoreHandle_t s_adv_lock;   // advertise() は host タスクと status_adv タスクの両方から呼ばれる
 
 // scan response: [会社 ID 0xFFFF (LE)][状態 payload ≤27]。AD ヘッダ 2 を足して 31 バイトに収める
@@ -208,12 +210,11 @@ static void advertise(void)
     ble_gap_adv_stop();   // 広告中なら止める（未広告なら BLE_HS_EALREADY が返るだけ）
     struct ble_hs_adv_fields f = {0};
     f.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    f.name = (uint8_t *)DEV_NAME;
-    f.name_len = strlen(DEV_NAME);
+    // 名前に ID を入れると 128bit UUID（18 バイト）が 31 バイトに収まらないので、UUID は広告に載せない。
+    // クライアントは名前の前方一致 "M5Cam" で探す（GATT のサービス探索は広告と無関係に行える）
+    f.name = (uint8_t *)s_name;
+    f.name_len = strlen(s_name);
     f.name_is_complete = 1;
-    f.uuids128 = (ble_uuid128_t *)&SVC_UUID;
-    f.num_uuids128 = 1;
-    f.uuids128_is_complete = 1;
     int rc = ble_gap_adv_set_fields(&f);
     if (rc) { ESP_LOGE(TAG, "adv_set_fields %d", rc); xSemaphoreGive(s_adv_lock); return; }
     if (s_mfg_len) {
@@ -244,7 +245,7 @@ static void on_sync(void)
     ble_hs_id_infer_auto(0, &s_own_addr_type);
     s_synced = true;
     advertise();
-    ESP_LOGI(TAG, "advertising as \"%s\"", DEV_NAME);
+    ESP_LOGI(TAG, "advertising as \"%s\"", s_name);
 }
 
 void ble_snap_set_status(const uint8_t *payload, size_t len)
@@ -341,7 +342,10 @@ esp_err_t ble_snap_start(void)
     int rc = ble_gatts_count_cfg(GATT_SVCS);
     if (!rc) rc = ble_gatts_add_svcs(GATT_SVCS);
     if (rc) return ESP_FAIL;
-    ble_svc_gap_device_name_set(DEV_NAME);
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(s_name, sizeof(s_name), DEV_NAME "-%02x%02x%02x", mac[3], mac[4], mac[5]);
+    ble_svc_gap_device_name_set(s_name);
     xTaskCreate(worker, "ble_snap", 6144, NULL, 4, NULL);
     nimble_port_freertos_init(host_task);
     return ESP_OK;

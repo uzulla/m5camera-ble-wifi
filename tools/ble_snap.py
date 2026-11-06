@@ -24,7 +24,8 @@ DATA = "5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0003"
 
 async def main(path: str, query: str) -> None:
     dev = await BleakScanner.find_device_by_filter(
-        lambda d, ad: SVC in [u.lower() for u in ad.service_uuids], timeout=15
+        lambda d, ad: (d.name or ad.local_name or "").startswith("M5Cam") or SVC in [u.lower() for u in ad.service_uuids],
+        timeout=15,
     )
     if dev is None:
         sys.exit("M5Cam not found")

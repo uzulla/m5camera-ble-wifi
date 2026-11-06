@@ -40,6 +40,14 @@ int wifi_cfg_list(wifi_entry_t *out, int max);
 esp_err_t wifi_cfg_set(const char *ssid, const char *pass, int prio);
 esp_err_t wifi_cfg_del(const char *ssid);
 
+// HTTP の /wifi と同じ書式で登録 / 削除する（値は URL エンコード）。
+//   "ssid=HomeAP&pass=secret&prio=10" : 追加 / 更新（同じ SSID は上書き。pass 省略で open）
+//   "ssid=HomeAP&del=1"               : 削除
+// 戻り値: ESP_OK / ESP_ERR_INVALID_ARG(ssid なし・長すぎ) / ESP_ERR_NO_MEM(8 件超) / ESP_ERR_NOT_FOUND(削除対象なし)
+esp_err_t wifi_cfg_apply_query(const char *query);
+// 登録一覧の JSON（パスワードは含めない）。{"networks":[{"ssid":"..","prio":10,"secured":true},...]}。書いた長さを返す
+int wifi_cfg_list_json(char *buf, size_t cap);
+
 void wifi_mgr_status(wifi_sta_status_t *st);
 // NVS に STA の接続先が 1 件以上あるか
 bool wifi_mgr_sta_configured(void);

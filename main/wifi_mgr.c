@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_http_server.h"   // httpd_query_key_value（クエリ文字列の解析にだけ使う）
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
@@ -111,6 +112,64 @@ esp_err_t wifi_cfg_del(const char *ssid)
     nvs_close(h);
     if (e == ESP_OK) xEventGroupSetBits(s_ev, BIT_CFG_CHANGED);
     return e;
+}
+
+// ---- クエリ書式（HTTP / BLE 共通）----
+
+static void url_decode(char *s)
+{
+    char *o = s;
+    for (; *s; s++) {
+        if (*s == '+') {
+            *o++ = ' ';
+        } else if (*s == '%' && s[1] && s[2]) {
+            char h[3] = {s[1], s[2], 0};
+            *o++ = (char)strtol(h, NULL, 16);
+            s += 2;
+        } else {
+            *o++ = *s;
+        }
+    }
+    *o = 0;
+}
+
+esp_err_t wifi_cfg_apply_query(const char *query)
+{
+    char ssid[40] = "", pass[72] = "", v[12];
+    if (httpd_query_key_value(query, "ssid", ssid, sizeof(ssid)) != ESP_OK || !ssid[0]) return ESP_ERR_INVALID_ARG;
+    url_decode(ssid);
+    if (httpd_query_key_value(query, "del", v, sizeof(v)) == ESP_OK && atoi(v)) return wifi_cfg_del(ssid);
+    httpd_query_key_value(query, "pass", pass, sizeof(pass));
+    url_decode(pass);
+    int prio = 0;
+    if (httpd_query_key_value(query, "prio", v, sizeof(v)) == ESP_OK) prio = atoi(v);
+    return wifi_cfg_set(ssid, pass, prio);
+}
+
+static void json_str(char *dst, size_t len, const char *s)
+{
+    size_t o = 0;
+    for (; *s && o + 3 < len; s++) {
+        if (*s == '"' || *s == '\\') dst[o++] = '\\';
+        if ((unsigned char)*s < 0x20) continue;
+        dst[o++] = *s;
+    }
+    dst[o] = 0;
+}
+
+int wifi_cfg_list_json(char *buf, size_t cap)
+{
+    wifi_entry_t list[WIFI_MAX_ENTRIES];
+    int n = wifi_cfg_list(list, WIFI_MAX_ENTRIES);
+    char ssid[80];
+    int o = snprintf(buf, cap, "{\"networks\":[");
+    for (int i = 0; i < n && o < (int)cap; i++) {
+        json_str(ssid, sizeof(ssid), list[i].ssid);
+        o += snprintf(buf + o, cap - o, "%s{\"ssid\":\"%s\",\"prio\":%d,\"secured\":%s}", i ? "," : "",
+                      ssid, list[i].prio, list[i].pass[0] ? "true" : "false");
+    }
+    if (o < (int)cap) o += snprintf(buf + o, cap - o, "]}");
+    return o < (int)cap ? o : (int)cap - 1;
 }
 
 // ---- STA 接続（優先度順にフォールバック）----

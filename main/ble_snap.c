@@ -14,6 +14,7 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "snap.h"
+#include "wifi_mgr.h"
 
 static const char *TAG = "ble";
 
@@ -22,6 +23,10 @@ static const char *TAG = "ble";
 #define BLE_DEF_H 120
 #define BLE_DEF_Q 20
 #define REQ_MAX 120
+#define WIFI_REQ_MAX 255
+#define APP_ERR_INVALID 0x80
+#define APP_ERR_FULL 0x81
+#define APP_ERR_NOT_FOUND 0x82
 
 static const ble_uuid128_t SVC_UUID =
     BLE_UUID128_INIT(0x01, 0x00, 0x5b, 0x8e, 0x1a, 0x7c, 0x2e, 0x9f, 0x6a, 0x4d, 0x4e, 0x0b, 0x00, 0x00, 0x3c, 0x5a);
@@ -29,6 +34,8 @@ static const ble_uuid128_t REQ_UUID =
     BLE_UUID128_INIT(0x02, 0x00, 0x5b, 0x8e, 0x1a, 0x7c, 0x2e, 0x9f, 0x6a, 0x4d, 0x4e, 0x0b, 0x00, 0x00, 0x3c, 0x5a);
 static const ble_uuid128_t DATA_UUID =
     BLE_UUID128_INIT(0x03, 0x00, 0x5b, 0x8e, 0x1a, 0x7c, 0x2e, 0x9f, 0x6a, 0x4d, 0x4e, 0x0b, 0x00, 0x00, 0x3c, 0x5a);
+static const ble_uuid128_t WIFI_UUID =
+    BLE_UUID128_INIT(0x04, 0x00, 0x5b, 0x8e, 0x1a, 0x7c, 0x2e, 0x9f, 0x6a, 0x4d, 0x4e, 0x0b, 0x00, 0x00, 0x3c, 0x5a);
 
 static uint16_t s_data_handle;
 static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
@@ -63,6 +70,27 @@ static int data_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
     return BLE_ATT_ERR_READ_NOT_PERMITTED;
 }
 
+static int wifi_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        char buf[512];
+        int n = wifi_cfg_list_json(buf, sizeof(buf));
+        return os_mbuf_append(ctxt->om, buf, n) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_UNLIKELY;
+    char q[WIFI_REQ_MAX + 1];
+    uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
+    if (len > WIFI_REQ_MAX) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (ble_hs_mbuf_to_flat(ctxt->om, q, WIFI_REQ_MAX, &len) != 0) return BLE_ATT_ERR_UNLIKELY;
+    q[len] = 0;
+    esp_err_t e = wifi_cfg_apply_query(q);
+    ESP_LOGI(TAG, "wifi config via BLE: %s", esp_err_to_name(e));
+    if (e == ESP_OK) return 0;
+    if (e == ESP_ERR_NO_MEM) return APP_ERR_FULL;
+    if (e == ESP_ERR_NOT_FOUND) return APP_ERR_NOT_FOUND;
+    return APP_ERR_INVALID;
+}
+
 static const struct ble_gatt_svc_def GATT_SVCS[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -78,6 +106,11 @@ static const struct ble_gatt_svc_def GATT_SVCS[] = {
                 .access_cb = data_access,
                 .val_handle = &s_data_handle,
                 .flags = BLE_GATT_CHR_F_NOTIFY,
+            },
+            {
+                .uuid = &WIFI_UUID.u,
+                .access_cb = wifi_access,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
             },
             {0},
         },

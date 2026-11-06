@@ -98,6 +98,16 @@ curl -X POST 'http://192.168.4.1/wifi?ssid=HomeAP&pass=password&prio=10'
 
 SSID / パスワードの特殊文字は URL エンコードしてください。
 
+**C. BLE で登録する**（Wi-Fi に繋がっていない機体を、AP に繋ぎ替えずに設定する）
+
+```bash
+tools/ble_set_wifi.py HomeAP 'password' 10   # 登録して、広告の状態が「接続中」になるまで待って IP を表示
+tools/ble_set_wifi.py --del HomeAP           # 削除
+tools/ble_set_wifi.py --list                 # 登録一覧
+```
+
+複数台が見えるときは `--id 445566`（`status_scan.py` の `M5Cam-XXXXXX`）で選びます。GATT の WIFI 特性（後述）に書いているだけなので、他のクライアントからも同じ書式で設定できます。
+
 ## BLE
 
 デバイス名 `M5Cam`。低速（実測 5〜15 KiB/s）ですが、小さい画像なら 1 秒以内で取れます。
@@ -107,6 +117,7 @@ SSID / パスワードの特殊文字は URL エンコードしてください�
 | Service | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0001` |
 | REQ（Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0002` — `w=160&h=120&q=20&rot=90&gray=1` のように HTTP と同じクエリを書く（空でも可） |
 | DATA（Notify） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0003` — `[seq u16 LE][payload]` |
+| WIFI（Read / Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004` — Write: `ssid=HomeAP&pass=secret&prio=10`（`POST /wifi` と同じ書式。URL エンコード）で NVS に登録 / 更新、`ssid=HomeAP&del=1` で削除。Read: 登録一覧の JSON（`GET /wifi` と同じ）。失敗は ATT エラー `0x80`（不正）/ `0x81`（8 件超）/ `0x82`（見つからない） |
 
 DATA を購読してから REQ に書くと、撮影後に通知で届きます。`seq=0` の payload は `[JPEG 全長 u32 LE][JPEG の先頭]`、以降は続き。`seq=0xFFFF` はエラーメッセージ（ASCII）です。
 
@@ -181,6 +192,6 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 | `main/cpu_mon.c` | FreeRTOS の実行時間統計から CPU 使用率を算出 |
 | `docs/i2c.md` | I2C の開発者向け資料 |
 | `examples/powerhub_i2c_master/` | I2C マスターのサンプル（PowerHub / ESP-IDF） |
-| `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py`、`status_scan.py`（状態の広告を読む） |
+| `tools/` | `sync.sh`（buildhost へ同期・ビルド）、`make_nvs.py`、`ble_snap.py`、`status_scan.py`（状態の広告を読む）、`ble_set_wifi.py`（BLE で Wi-Fi を登録） |
 
 カメラのピン: XCLK 27 / SIOD 22 / SIOC 23 / VSYNC 25 / HREF 26 / PCLK 21 / RESET 15 / D0〜D7 = 32, 35, 34, 5, 39, 18, 36, 19。

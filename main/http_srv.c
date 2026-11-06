@@ -33,23 +33,6 @@ static void get_query(httpd_req_t *req, char *q, size_t len)
     if (httpd_req_get_url_query_str(req, q, len) != ESP_OK) q[0] = 0;
 }
 
-static void url_decode(char *s)
-{
-    char *o = s;
-    for (; *s; s++) {
-        if (*s == '+') {
-            *o++ = ' ';
-        } else if (*s == '%' && s[1] && s[2]) {
-            char h[3] = {s[1], s[2], 0};
-            *o++ = (char)strtol(h, NULL, 16);
-            s += 2;
-        } else {
-            *o++ = *s;
-        }
-    }
-    *o = 0;
-}
-
 // ---- /jpg ----
 
 static esp_err_t jpg_handler(httpd_req_t *req)
@@ -189,47 +172,27 @@ static esp_err_t status_handler(httpd_req_t *req)
 
 static esp_err_t wifi_list_handler(httpd_req_t *req)
 {
-    wifi_entry_t list[WIFI_MAX_ENTRIES];
-    int n = wifi_cfg_list(list, WIFI_MAX_ENTRIES);
-    char buf[1024], ssid[80];
-    int o = snprintf(buf, sizeof(buf), "{\"networks\":[");
-    for (int i = 0; i < n; i++) {
-        json_str(ssid, sizeof(ssid), list[i].ssid);
-        o += snprintf(buf + o, sizeof(buf) - o, "%s{\"ssid\":\"%s\",\"prio\":%d,\"secured\":%s}", i ? "," : "",
-                      ssid, list[i].prio, list[i].pass[0] ? "true" : "false");
-    }
-    o += snprintf(buf + o, sizeof(buf) - o, "]}");
+    char buf[1024];
+    int o = wifi_cfg_list_json(buf, sizeof(buf));
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, o);
 }
 
-static esp_err_t wifi_post_handler(httpd_req_t *req)
+static esp_err_t wifi_apply_handler(httpd_req_t *req, bool del)
 {
-    char q[256], ssid[40] = "", pass[72] = "", v[12];
+    char q[256];
     get_query(req, q, sizeof(q));
-    if (httpd_query_key_value(q, "ssid", ssid, sizeof(ssid)) != ESP_OK || !ssid[0])
-        return send_error(req, "400 Bad Request", "ssid required");
-    httpd_query_key_value(q, "pass", pass, sizeof(pass));
-    int prio = 0;
-    if (httpd_query_key_value(q, "prio", v, sizeof(v)) == ESP_OK) prio = atoi(v);
-    url_decode(ssid);
-    url_decode(pass);
-    esp_err_t e = wifi_cfg_set(ssid, pass, prio);
+    if (del) strlcat(q, "&del=1", sizeof(q));
+    esp_err_t e = wifi_cfg_apply_query(q);
+    if (e == ESP_ERR_INVALID_ARG) return send_error(req, "400 Bad Request", "ssid required (max 32) / pass max 64");
     if (e == ESP_ERR_NO_MEM) return send_error(req, "507 Insufficient Storage", "max 8 networks");
+    if (e == ESP_ERR_NOT_FOUND) return send_error(req, "404 Not Found", "not found");
     if (e != ESP_OK) return send_error(req, "400 Bad Request", "invalid");
     return wifi_list_handler(req);
 }
 
-static esp_err_t wifi_delete_handler(httpd_req_t *req)
-{
-    char q[128], ssid[40] = "";
-    get_query(req, q, sizeof(q));
-    if (httpd_query_key_value(q, "ssid", ssid, sizeof(ssid)) != ESP_OK)
-        return send_error(req, "400 Bad Request", "ssid required");
-    url_decode(ssid);
-    if (wifi_cfg_del(ssid) != ESP_OK) return send_error(req, "404 Not Found", "not found");
-    return wifi_list_handler(req);
-}
+static esp_err_t wifi_post_handler(httpd_req_t *req) { return wifi_apply_handler(req, false); }
+static esp_err_t wifi_delete_handler(httpd_req_t *req) { return wifi_apply_handler(req, true); }
 
 static esp_err_t index_handler(httpd_req_t *req)
 {

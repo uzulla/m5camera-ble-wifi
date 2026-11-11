@@ -6,6 +6,7 @@
 #include "cpu_mon.h"
 #include "http_srv.h"
 #include "i2c_snap.h"
+#include "mdns_srv.h"
 #include "snap.h"
 #include "status_adv.h"
 #include "wifi_mgr.h"
@@ -33,6 +34,7 @@ void app_main(void)
     if (snap_init() != ESP_OK) ESP_LOGE(TAG, "camera unavailable; continuing without it");
     ESP_ERROR_CHECK(wifi_mgr_start());
     ESP_ERROR_CHECK(http_start());
+    if (mdns_srv_start() != ESP_OK) ESP_LOGE(TAG, "mDNS failed to start");
     if (ble_snap_start() != ESP_OK) ESP_LOGE(TAG, "BLE failed to start");
     if (i2c_snap_start() != ESP_OK) ESP_LOGE(TAG, "I2C slave failed to start");
     if (status_adv_start() != ESP_OK) ESP_LOGE(TAG, "status broadcast failed to start");

@@ -27,7 +27,7 @@ esp_err_t mdns_srv_start(void)
     if (e != ESP_OK) return e;
     mdns_hostname_set(host);
     mdns_instance_name_set(inst);
-    mdns_txt_item_t txt[] = {{"id", id}, {"mac", macs}, {"path", "/jpg"}};
+    mdns_txt_item_t txt[] = {{"id", id}, {"mac", macs}, {"path", "/image"}};
     size_t n = sizeof(txt) / sizeof(txt[0]);
     e = mdns_service_add(NULL, "_m5cam", "_tcp", 80, txt, n);
     if (e == ESP_OK) e = mdns_service_add(NULL, "_http", "_tcp", 80, txt, n);

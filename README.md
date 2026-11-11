@@ -21,10 +21,10 @@ tools/sync.sh flash    # 同期してビルド・書き込み（PORT=/dev/ttyUSB
 | STA | NVS に登録した Wi-Fi に接続。**複数登録でき、Priority の大きい順に試し、失敗したら次へフォールバック** |
 
 接続先ごとに最長 1 分待ちます（アソシエーション後、DHCP で IP が来るまで。モバイルルーターなど払い出しが遅いものがあるため）。STA が切れると、Priority の先頭から試し直します。接続中に登録を変更したときも同様です。AP のチャンネルは STA の接続先に追従します（ESP32 の仕様）。
-**mDNS**: `m5cam-XXXXXX.local`（XXXXXX は STA MAC の下位 3 バイト。BLE の広告名 `M5Cam-XXXXXX` と同じ ID）で引けます。AP 側・STA 側のどちらからでも応答します。サービスは `_m5cam._tcp`（この機体だけを探す用）と `_http._tcp`（どちらもポート 80、TXT に `id` / `mac` / `path=/jpg`）です。
+**mDNS**: `m5cam-XXXXXX.local`（XXXXXX は STA MAC の下位 3 バイト。BLE の広告名 `M5Cam-XXXXXX` と同じ ID）で引けます。AP 側・STA 側のどちらからでも応答します。サービスは `_m5cam._tcp`（この機体だけを探す用）と `_http._tcp`（どちらもポート 80、TXT に `id` / `mac` / `path=/image`）です。
 
 ```bash
-curl 'http://m5cam-445566.local/jpg' -o snap.jpg
+curl 'http://m5cam-445566.local/image' -o snap.jpg
 dns-sd -B _m5cam._tcp            # macOS。Linux は avahi-browse -rt _m5cam._tcp
 ```
 
@@ -47,8 +47,9 @@ Web Bluetooth のページには「無線」の節にトグルと再起動ボタ
 
 | パス | 内容 |
 |---|---|
-| `GET /jpg` | スナップ（JPEG。`fmt=` で PGM / PPM / 生 BGRA） |
-| `GET /jpg_stream` | `multipart/x-mixed-replace` のストリーム。`fps=` で上限指定 |
+| `GET /image` | スナップ（既定は JPEG。`fmt=` で PGM / PPM / 生 BGRA） |
+| `GET /stream` | `multipart/x-mixed-replace` のストリーム。`fps=` で上限指定 |
+| `GET /jpg`, `GET /jpg_stream` | `/image` `/stream` の旧名（互換のために残している。動作は同じ） |
 | `GET /cpu` | CPU 使用率（JSON） |
 | `GET /status` | 稼働時間、メモリ、AP/STA の状態。AP と STA の MAC、STA の IP/netmask/gw、AP に接続中のクライアントの MAC・DHCP で払い出した IP・RSSI |
 | `GET /wifi` | 登録済みの STA 接続先（パスワードは返さない） |
@@ -57,7 +58,7 @@ Web Bluetooth のページには「無線」の節にトグルと再起動ボタ
 | `GET /radio` | AP / STA のオンオフ。`{"ap":true,"sta":false,"active":{...}}`（保存値と、今動いている状態） |
 | `POST /radio?ap=0|1&sta=0|1&reboot=1` | オンオフを NVS に保存（次の起動から）。`reboot=1` で再起動 |
 
-### 画像のパラメータ（`/jpg` `/jpg_stream` と BLE で共通）
+### 画像のパラメータ（`/image` `/stream` と BLE で共通）
 
 | 名前 | 意味 | 既定 |
 |---|---|---|
@@ -69,12 +70,12 @@ Web Bluetooth のページには「無線」の節にトグルと再起動ボタ
 | `fmt` | 出力形式。`jpg` / `pgm` / `ppm` / `bgra`（下の「非圧縮の形式」） | jpg |
 
 ```bash
-curl 'http://192.168.4.1/jpg?w=320&h=240&q=60' -o snap.jpg
-curl 'http://192.168.4.1/jpg?w=1600&h=1200&q=100' -o best.jpg           # 最高画質（トップページ `/` にもリンクあり）
-curl 'http://192.168.4.1/jpg?w=320&h=240&rot=90' -o rotated.jpg          # 240x320 が返る
-curl 'http://192.168.4.1/jpg?w=96&h=96&q=0&gray=1&fit=crop' -o tiny.jpg  # とにかく小さく（600 バイト前後）
-curl 'http://192.168.4.1/jpg?w=160&h=120&fmt=pgm' -o snap.pgm            # 非圧縮 gray8
-curl 'http://192.168.4.1/jpg?w=160&h=120&fmt=bgra' -o snap.bgra          # 生 BGRA（76800 バイト）
+curl 'http://192.168.4.1/image?w=320&h=240&q=60' -o snap.jpg
+curl 'http://192.168.4.1/image?w=1600&h=1200&q=100' -o best.jpg           # 最高画質（トップページ `/` にもリンクあり）
+curl 'http://192.168.4.1/image?w=320&h=240&rot=90' -o rotated.jpg          # 240x320 が返る
+curl 'http://192.168.4.1/image?w=96&h=96&q=0&gray=1&fit=crop' -o tiny.jpg  # とにかく小さく（600 バイト前後）
+curl 'http://192.168.4.1/image?w=160&h=120&fmt=pgm' -o snap.pgm            # 非圧縮 gray8
+curl 'http://192.168.4.1/image?w=160&h=120&fmt=bgra' -o snap.bgra          # 生 BGRA（76800 バイト）
 ```
 
 応答ヘッダの `X-Mode`（`native` / `soft` / `raw`）、`X-Size`（出力サイズ）、`X-Format`（`jpg` / `pgm` / `ppm` / `bgra`）で、どの経路で作ったかが分かります。
@@ -97,7 +98,7 @@ curl 'http://192.168.4.1/jpg?w=160&h=120&fmt=bgra' -o snap.bgra          # 生 B
 - 元はセンサーの JPEG（RGB565 にデコード）なので、色の精度は 5-6-5 ビット相当です。
 - **撮影サイズは `w` ≤ 320、`h` ≤ 240 まで**で、超えると 400（BLE / I2C はエラー）になります。非圧縮は大きく（PSRAM に丸ごと持つ）、大きいサイズを許すとメモリと帯域を簡単に使い切れてしまうためです。最大は 320x240 の `bgra` で 307,200 バイト。縦長が欲しいときは `w=320&h=240&rot=90` のように回転で指定します。
 - `w` `h` を省略すると、既定のサイズが 320x240 を超える HTTP では 320x240 になります（BLE / I2C は既定の 160x120 のまま）。
-- `/jpg_stream` でも使えます（各パートの Content-Type が変わる）。
+- `/stream` でも使えます（各パートの Content-Type が変わる）。
 
 ### CPU 使用率 `GET /cpu`
 
@@ -216,7 +217,7 @@ ESP32 のスレーブはクロックストレッチができないため、**「
 
 | 手順 | マスターの操作 | 内容 |
 |---|---|---|
-| 1 | 書き込み `[0x01]` + クエリ文字列 | 撮影開始。クエリは HTTP の `/jpg` と同じ（空なら 160x120, q=20） |
+| 1 | 書き込み `[0x01]` + クエリ文字列 | 撮影開始。クエリは HTTP の `/image` と同じ（空なら 160x120, q=20） |
 | 2 | 書き込み `[0x02]` → 11 バイト読み出し | STATUS: `[0xA5][state][total u32][w u16][h u16][crc8]`。state は 0=なし 1=撮影中 2=完了 3=エラー。2 になるまで繰り返す |
 | 3 | 書き込み `[0x03][offset u32][n u8]` → n+3 バイト読み出し | DATA: `[0xA5][n][data × n][crc8]` |
 | 4 | offset を進めて total まで 3 を繰り返す | |

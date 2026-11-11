@@ -21,7 +21,14 @@ tools/sync.sh flash    # 同期してビルド・書き込み（PORT=/dev/ttyUSB
 | STA | NVS に登録した Wi-Fi に接続。**複数登録でき、Priority の大きい順に試し、失敗したら次へフォールバック** |
 
 接続先ごとに最長 1 分待ちます（アソシエーション後、DHCP で IP が来るまで。モバイルルーターなど払い出しが遅いものがあるため）。STA が切れると、Priority の先頭から試し直します。接続中に登録を変更したときも同様です。AP のチャンネルは STA の接続先に追従します（ESP32 の仕様）。
-STA の IP は、接続せずに読める **状態の広告**（後述。BLE 広告と AP ビーコンに載せている）、`/status`、シリアルログ（`STA got IP`）のいずれかで分かります。
+**mDNS**: `m5cam-XXXXXX.local`（XXXXXX は STA MAC の下位 3 バイト。BLE の広告名 `M5Cam-XXXXXX` と同じ ID）で引けます。AP 側・STA 側のどちらからでも応答します。サービスは `_m5cam._tcp`（この機体だけを探す用）と `_http._tcp`（どちらもポート 80、TXT に `id` / `mac` / `path=/jpg`）です。
+
+```bash
+curl 'http://m5cam-445566.local/jpg' -o snap.jpg
+dns-sd -B _m5cam._tcp            # macOS。Linux は avahi-browse -rt _m5cam._tcp
+```
+
+STA の IP は、mDNS のほか、接続せずに読める **状態の広告**（後述。BLE 広告と AP ビーコンに載せている）、`/status`、シリアルログ（`STA got IP`）のいずれかで分かります。
 
 > AP はパスワードなしで、`/wifi` も認証なしです。信頼できる場所でのみ使ってください。
 
@@ -40,7 +47,7 @@ Web Bluetooth のページには「無線」の節にトグルと再起動ボタ
 
 | パス | 内容 |
 |---|---|
-| `GET /jpg` | スナップ（JPEG） |
+| `GET /jpg` | スナップ（JPEG。`fmt=` で PGM / PPM / 生 BGRA） |
 | `GET /jpg_stream` | `multipart/x-mixed-replace` のストリーム。`fps=` で上限指定 |
 | `GET /cpu` | CPU 使用率（JSON） |
 | `GET /status` | 稼働時間、メモリ、AP/STA の状態。AP と STA の MAC、STA の IP/netmask/gw、AP に接続中のクライアントの MAC・DHCP で払い出した IP・RSSI |
@@ -59,18 +66,37 @@ Web Bluetooth のページには「無線」の節にトグルと再起動ボタ
 | `rot` | 時計回りに 0 / 90 / 180 / 270 回転。90・270 は縦横が入れ替わって返る | 0 |
 | `gray` | 1 でグレースケール（さらに小さくなる） | 0 |
 | `fit` | `stretch`（既定。縦横比を無視して合わせる）/ `crop`（中央を切り出す） | stretch |
+| `fmt` | 出力形式。`jpg` / `pgm` / `ppm` / `bgra`（下の「非圧縮の形式」） | jpg |
 
 ```bash
 curl 'http://192.168.4.1/jpg?w=320&h=240&q=60' -o snap.jpg
 curl 'http://192.168.4.1/jpg?w=1600&h=1200&q=100' -o best.jpg           # 最高画質（トップページ `/` にもリンクあり）
 curl 'http://192.168.4.1/jpg?w=320&h=240&rot=90' -o rotated.jpg          # 240x320 が返る
 curl 'http://192.168.4.1/jpg?w=96&h=96&q=0&gray=1&fit=crop' -o tiny.jpg  # とにかく小さく（600 バイト前後）
+curl 'http://192.168.4.1/jpg?w=160&h=120&fmt=pgm' -o snap.pgm            # 非圧縮 gray8
+curl 'http://192.168.4.1/jpg?w=160&h=120&fmt=bgra' -o snap.bgra          # 生 BGRA（76800 バイト）
 ```
 
-応答ヘッダの `X-Mode`（`native` / `soft`）と `X-Size`（出力サイズ）で、どちらの経路で作ったかが分かります。
+応答ヘッダの `X-Mode`（`native` / `soft` / `raw`）、`X-Size`（出力サイズ）、`X-Format`（`jpg` / `pgm` / `ppm` / `bgra`）で、どの経路で作ったかが分かります。
 
 - **native**: センサーが出力した JPEG をそのまま返す。速い（ストリームで実用的）。条件は、`w`×`h` がセンサーの解像度（160x120, 240x176, 320x240, 400x296, 640x480, 800x600, 1024x768, 1280x1024, 1600x1200）に一致し、`gray=0`、`rot` が 0 か 180（180 はセンサーの反転で行う）であること。
 - **soft**: デコード → リサイズ・回転・グレースケール → 再エンコード。任意サイズが指定できるが遅い（QVGA で 0.3〜0.6 秒程度）。撮影サイズは 800x600 まで。
+- **raw**: `fmt` が `jpg` 以外のとき。デコード → リサイズ・回転・グレースケールまでは soft と同じで、再エンコードせずに画素を返す。撮影サイズは 800x600 まで。
+
+#### 非圧縮の形式（`fmt`）
+
+| `fmt` | 中身 | サイズ | Content-Type |
+|---|---|---|---|
+| `pgm` | 1 行のヘッダ `P5 <w> <h> 255\n` + gray8（1 バイト/画素）。`gray=1` を指定しなくてもグレースケールになる | ヘッダ + w×h | `image/x-portable-graymap` |
+| `ppm` | 1 行のヘッダ `P6 <w> <h> 255\n` + RGB24（R, G, B の順） | ヘッダ + w×h×3 | `image/x-portable-pixmap` |
+| `bgra` | ヘッダなし。B, G, R, A の順で 4 バイト/画素、A は常に 255 | w×h×4 | `application/octet-stream` |
+
+- 画素は左上から行順で、行の詰め物はありません。`<w>` `<h>` は出力サイズ（`rot=90/270` では入れ替わった後）です。
+- `bgra` にはサイズの情報がないので、HTTP は `X-Size`、I2C は STATUS の w / h、BLE は要求した `w` `h`（全長 = w×h×4）から判断してください。
+- `q` は無視されます。`ppm` / `bgra` に `gray=1` を付けると R=G=B のグレースケールになります。
+- 元はセンサーの JPEG（RGB565 にデコード）なので、色の精度は 5-6-5 ビット相当です。
+- 画像は PSRAM に丸ごと持ちます。800x600 の `bgra` は 1.9MB で、空きが足りなければ `no memory` のエラーになります（I2C は直前の画像を次の SNAP まで保持するので、大きい非圧縮画像を I2C で撮った後は特に不足しやすい）。BLE / I2C は転送が遅いので、小さいサイズ向けです。
+- `/jpg_stream` でも使えます（各パートの Content-Type が変わる）。
 
 ### CPU 使用率 `GET /cpu`
 
@@ -134,10 +160,11 @@ tools/ble_set_wifi.py --list                 # 登録一覧
 | CTRL（Read / Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0006` — Write: `ap=0&sta=1` で AP / STA のオンオフを NVS に保存（次の起動から）、`reboot=1` で再起動。Read: `GET /radio` と同じ JSON |
 | WIFI（Read / Write） | `5a3c0000-0b4e-4d6a-9f2e-7c1a8e5b0004` — Write: `ssid=HomeAP&pass=secret&prio=10`（`POST /wifi` と同じ書式。URL エンコード）で NVS に登録 / 更新、`ssid=HomeAP&del=1` で削除。Read: 登録一覧の JSON（`GET /wifi` と同じ）。失敗は ATT エラー `0x80`（不正）/ `0x81`（8 件超）/ `0x82`（見つからない） |
 
-DATA を購読してから REQ に書くと、撮影後に通知で届きます。`seq=0` の payload は `[JPEG 全長 u32 LE][JPEG の先頭]`、以降は続き。`seq=0xFFFF` はエラーメッセージ（ASCII）です。
+DATA を購読してから REQ に書くと、撮影後に通知で届きます。`seq=0` の payload は `[画像の全長 u32 LE][画像の先頭]`、以降は続き（`fmt=` で JPEG 以外も同じ）。`seq=0xFFFF` はエラーメッセージ（ASCII）です。
 
 ```bash
 tools/ble_snap.py out.jpg "w=96&h=96&q=0&gray=1"   # macOS / Linux。uv が bleak を入れる
+tools/ble_snap.py out.pgm "w=96&h=96&fmt=pgm"      # 非圧縮（9.2KB）
 ```
 
 ## 状態の広告（BLE 広告 / Wi-Fi ビーコン）
@@ -210,12 +237,13 @@ I2C の信号線（IO4/13）は USB シリアル（CP2104）のピンと別な�
 
 | ファイル | 役割 |
 |---|---|
-| `main/snap.c` | カメラ初期化、パラメータ解析、native / soft の撮影 |
+| `main/snap.c` | カメラ初期化、パラメータ解析、native / soft / raw の撮影 |
 | `main/wifi_mgr.c` | AP + STA、NVS の接続先管理、優先度フォールバック |
 | `main/http_srv.c` | HTTP サーバー（ストリームは別タスクで配信し、他のリクエストを塞がない） |
 | `main/ble_snap.c` | NimBLE の GATT サービス、広告（scan response に状態） |
 | `main/status_adv.c` | 状態のバイト列を組み立て、BLE 広告と AP のベンダー IE に反映 |
 | `main/i2c_snap.c` | I2C スレーブ（他のマイコンからの取得） |
+| `main/mdns_srv.c` | mDNS（`m5cam-XXXXXX.local`、`_m5cam._tcp` / `_http._tcp`） |
 | `main/cpu_mon.c` | FreeRTOS の実行時間統計から CPU 使用率を算出 |
 | `web/index.html` | Web Bluetooth のページ（Android の Chrome 向け。状態・Wi-Fi 登録・スナップ） |
 | `docs/i2c.md` | I2C の開発者向け資料 |

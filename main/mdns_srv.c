@@ -31,7 +31,10 @@ esp_err_t mdns_srv_start(void)
     size_t n = sizeof(txt) / sizeof(txt[0]);
     e = mdns_service_add(NULL, "_m5cam", "_tcp", 80, txt, n);
     if (e == ESP_OK) e = mdns_service_add(NULL, "_http", "_tcp", 80, txt, n);
-    if (e != ESP_OK) return e;
+    if (e != ESP_OK) {
+        mdns_free();   // 片方だけ登録された中途半端な状態を残さない
+        return e;
+    }
     ESP_LOGI(TAG, "%s.local (_m5cam._tcp / _http._tcp, port 80)", host);
     return ESP_OK;
 }

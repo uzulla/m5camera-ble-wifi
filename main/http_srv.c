@@ -20,6 +20,7 @@ static const char *TAG = "http";
 #define DEF_H 480
 #define DEF_Q 50
 #define STREAM_BOUNDARY "frame"
+#define STREAM_MAX_FAILS 10   // 撮影が連続でこの回数失敗したらストリームを閉じる
 
 static esp_err_t send_error(httpd_req_t *req, const char *status, const char *msg)
 {
@@ -69,20 +70,27 @@ typedef struct {
 static void stream_task(void *arg)
 {
     stream_ctx_t *c = arg;
-    char err[160], hdr[128];
+    char err[160], hdr[192];
+    int fails = 0;
     httpd_resp_set_type(c->req, "multipart/x-mixed-replace;boundary=" STREAM_BOUNDARY);
     httpd_resp_set_hdr(c->req, "Cache-Control", "no-store");
     for (;;) {
         int64_t t0 = esp_timer_get_time();
         snap_t s;
-        if (snap_capture(&c->p, &s, err, sizeof(err)) != ESP_OK) {
+        esp_err_t ce = snap_capture(&c->p, &s, err, sizeof(err));
+        if (ce != ESP_OK) {
             ESP_LOGW(TAG, "stream: %s", err);
+            // 失敗中は何も送らないのでクライアントの切断に気付けない。直らないエラー（サイズ超過など）や
+            // 失敗が続くときは閉じて、タスクとソケットを残さない
+            if (ce == ESP_ERR_INVALID_ARG || ++fails >= STREAM_MAX_FAILS) break;
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
+        fails = 0;
         int hl = snprintf(hdr, sizeof(hdr),
-                          "\r\n--" STREAM_BOUNDARY "\r\nContent-Type: %s\r\nContent-Length: %u\r\n\r\n",
-                          s.mime, (unsigned)s.len);
+                          "\r\n--" STREAM_BOUNDARY "\r\nContent-Type: %s\r\nContent-Length: %u\r\n"
+                          "X-Format: %s\r\nX-Size: %dx%d\r\n\r\n",
+                          s.mime, (unsigned)s.len, s.fmt_name, s.w, s.h);
         esp_err_t e = httpd_resp_send_chunk(c->req, hdr, hl);
         if (e == ESP_OK) e = httpd_resp_send_chunk(c->req, (const char *)s.data, s.len);
         snap_free(&s);

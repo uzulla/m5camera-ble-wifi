@@ -93,13 +93,19 @@ esp_err_t snap_params_parse(const char *query, snap_params_t *p, char *err, size
     if (get_int(query, "q", &v, err, errlen)) p->q = v;
     if (get_int(query, "rot", &v, err, errlen) || get_int(query, "r", &v, err, errlen)) p->rot = v;
     if (get_int(query, "gray", &v, err, errlen)) p->gray = v != 0;
+    // キーがなければ既定のまま。値が長すぎて切り詰められたとき（ESP_OK でも NOT_FOUND でもない）は
+    // 空文字にして不正な値として扱う（黙って既定の形式で返さない）
     char s[16];
-    if (httpd_query_key_value(query, "fit", s, sizeof(s)) == ESP_OK) {
+    esp_err_t ke = httpd_query_key_value(query, "fit", s, sizeof(s));
+    if (ke != ESP_ERR_NOT_FOUND) {
+        if (ke != ESP_OK) s[0] = 0;
         if (!strcmp(s, "crop")) p->crop = true;
         else if (!strcmp(s, "stretch")) p->crop = false;
         else snprintf(err, errlen, "fit must be stretch or crop");
     }
-    if (httpd_query_key_value(query, "fmt", s, sizeof(s)) == ESP_OK) {
+    ke = httpd_query_key_value(query, "fmt", s, sizeof(s));
+    if (ke != ESP_ERR_NOT_FOUND) {
+        if (ke != ESP_OK) s[0] = 0;
         if (!strcmp(s, "jpg") || !strcmp(s, "jpeg")) p->fmt = SNAP_FMT_JPEG;
         else if (!strcmp(s, "pgm")) p->fmt = SNAP_FMT_PGM;
         else if (!strcmp(s, "ppm")) p->fmt = SNAP_FMT_PPM;

@@ -48,7 +48,7 @@ Web Bluetooth のページには「無線」の節にトグルと再起動ボタ
 | パス | 内容 |
 |---|---|
 | `GET /image` | スナップ（既定は JPEG。`fmt=` で PGM / PPM / 生 BGRA） |
-| `GET /stream` | `multipart/x-mixed-replace` のストリーム。`fps=` で上限指定 |
+| `GET /stream` | `multipart/x-mixed-replace` のストリーム。`fps=` で上限指定。各パートに `X-Format` / `X-Size`。撮影できないサイズの指定や、撮影の失敗が続いたときは閉じる |
 | `GET /jpg`, `GET /jpg_stream` | `/image` `/stream` の旧名（互換のために残している。動作は同じ） |
 | `GET /cpu` | CPU 使用率（JSON） |
 | `GET /status` | 稼働時間、メモリ、AP/STA の状態。AP と STA の MAC、STA の IP/netmask/gw、AP に接続中のクライアントの MAC・DHCP で払い出した IP・RSSI |
@@ -98,7 +98,7 @@ curl 'http://192.168.4.1/image?w=160&h=120&fmt=bgra' -o snap.bgra          # 生
 - 元はセンサーの JPEG（RGB565 にデコード）なので、色の精度は 5-6-5 ビット相当です。
 - **撮影サイズは `w` ≤ 320、`h` ≤ 240 まで**で、超えると 400（BLE / I2C はエラー）になります。非圧縮は大きく（PSRAM に丸ごと持つ）、大きいサイズを許すとメモリと帯域を簡単に使い切れてしまうためです。最大は 320x240 の `bgra` で 307,200 バイト。縦長が欲しいときは `w=320&h=240&rot=90` のように回転で指定します。
 - `w` `h` を省略すると、既定のサイズが 320x240 を超える HTTP では 320x240 になります（BLE / I2C は既定の 160x120 のまま）。
-- `/stream` でも使えます（各パートの Content-Type が変わる）。
+- `/stream` でも使えます（各パートの Content-Type が変わり、パートのヘッダに `X-Format` と `X-Size` が付く）。
 
 ### CPU 使用率 `GET /cpu`
 

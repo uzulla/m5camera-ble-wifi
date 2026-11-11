@@ -20,6 +20,7 @@ static const char *TAG = "http";
 #define DEF_H 480
 #define DEF_Q 50
 #define STREAM_BOUNDARY "frame"
+#define STREAM_MAX_FAILS 10   // 撮影が連続でこの回数失敗したらストリームを閉じる
 
 static esp_err_t send_error(httpd_req_t *req, const char *status, const char *msg)
 {
@@ -33,9 +34,9 @@ static void get_query(httpd_req_t *req, char *q, size_t len)
     if (httpd_req_get_url_query_str(req, q, len) != ESP_OK) q[0] = 0;
 }
 
-// ---- /jpg ----
+// ---- /image ----
 
-static esp_err_t jpg_handler(httpd_req_t *req)
+static esp_err_t image_handler(httpd_req_t *req)
 {
     char q[256], err[160] = "";
     get_query(req, q, sizeof(q));
@@ -47,9 +48,10 @@ static esp_err_t jpg_handler(httpd_req_t *req)
     if (snap_capture(&p, &s, err, sizeof(err)) != ESP_OK)
         return send_error(req, "500 Internal Server Error", err);
     char hv[32];
-    httpd_resp_set_type(req, "image/jpeg");
+    httpd_resp_set_type(req, s.mime);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_set_hdr(req, "X-Mode", s.mode);
+    httpd_resp_set_hdr(req, "X-Format", s.fmt_name);
     snprintf(hv, sizeof(hv), "%dx%d", s.w, s.h);
     httpd_resp_set_hdr(req, "X-Size", hv);
     esp_err_t e = httpd_resp_send(req, (const char *)s.data, s.len);
@@ -57,7 +59,7 @@ static esp_err_t jpg_handler(httpd_req_t *req)
     return e;
 }
 
-// ---- /jpg_stream（別タスクで配信し、他のリクエストを塞がない）----
+// ---- /stream（別タスクで配信し、他のリクエストを塞がない）----
 
 typedef struct {
     httpd_req_t *req;
@@ -68,20 +70,27 @@ typedef struct {
 static void stream_task(void *arg)
 {
     stream_ctx_t *c = arg;
-    char err[160], hdr[128];
+    char err[160], hdr[192];
+    int fails = 0;
     httpd_resp_set_type(c->req, "multipart/x-mixed-replace;boundary=" STREAM_BOUNDARY);
     httpd_resp_set_hdr(c->req, "Cache-Control", "no-store");
     for (;;) {
         int64_t t0 = esp_timer_get_time();
         snap_t s;
-        if (snap_capture(&c->p, &s, err, sizeof(err)) != ESP_OK) {
+        esp_err_t ce = snap_capture(&c->p, &s, err, sizeof(err));
+        if (ce != ESP_OK) {
             ESP_LOGW(TAG, "stream: %s", err);
+            // 失敗中は何も送らないのでクライアントの切断に気付けない。直らないエラー（サイズ超過など）や
+            // 失敗が続くときは閉じて、タスクとソケットを残さない
+            if (ce == ESP_ERR_INVALID_ARG || ++fails >= STREAM_MAX_FAILS) break;
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
+        fails = 0;
         int hl = snprintf(hdr, sizeof(hdr),
-                          "\r\n--" STREAM_BOUNDARY "\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",
-                          (unsigned)s.len);
+                          "\r\n--" STREAM_BOUNDARY "\r\nContent-Type: %s\r\nContent-Length: %u\r\n"
+                          "X-Format: %s\r\nX-Size: %dx%d\r\n\r\n",
+                          s.mime, (unsigned)s.len, s.fmt_name, s.w, s.h);
         esp_err_t e = httpd_resp_send_chunk(c->req, hdr, hl);
         if (e == ESP_OK) e = httpd_resp_send_chunk(c->req, (const char *)s.data, s.len);
         snap_free(&s);
@@ -220,10 +229,10 @@ static esp_err_t index_handler(httpd_req_t *req)
     static const char html[] =
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>M5Cam</title>"
         "<body style='font-family:sans-serif'><h3>M5Cam</h3><ul>"
-        "<li><a href='/jpg'>/jpg</a> (w, h, q, rot, gray, fit)</li>"
-        "<li><a href='/jpg?w=1600&h=1200&q=100'>/jpg?w=1600&amp;h=1200&amp;q=100</a> (最高画質)</li>"
-        "<li><a href='/jpg?w=160&h=120&q=10&gray=1'>/jpg?w=160&amp;h=120&amp;q=10&amp;gray=1</a></li>"
-        "<li><a href='/jpg_stream'>/jpg_stream</a> (+ fps)</li>"
+        "<li><a href='/image'>/image</a> (w, h, q, rot, gray, fit, fmt=jpg|pgm|ppm|bgra)</li>"
+        "<li><a href='/image?w=1600&h=1200&q=100'>/image?w=1600&amp;h=1200&amp;q=100</a> (最高画質)</li>"
+        "<li><a href='/image?w=160&h=120&q=10&gray=1'>/image?w=160&amp;h=120&amp;q=10&amp;gray=1</a></li>"
+        "<li><a href='/stream'>/stream</a> (+ fps)</li>"
         "<li><a href='/cpu'>/cpu</a></li><li><a href='/status'>/status</a></li>"
         "<li><a href='/wifi'>/wifi</a></li>"
         "<li><a href='/radio'>/radio</a> (POST ap=0|1 sta=0|1 reboot=1)</li></ul>";
@@ -233,7 +242,7 @@ static esp_err_t index_handler(httpd_req_t *req)
 esp_err_t http_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 12;
+    cfg.max_uri_handlers = 16;
     cfg.max_open_sockets = 7;
     cfg.stack_size = 8192;
     cfg.lru_purge_enable = true;
@@ -242,7 +251,10 @@ esp_err_t http_start(void)
     if (e != ESP_OK) return e;
     const httpd_uri_t uris[] = {
         {.uri = "/", .method = HTTP_GET, .handler = index_handler},
-        {.uri = "/jpg", .method = HTTP_GET, .handler = jpg_handler},
+        {.uri = "/image", .method = HTTP_GET, .handler = image_handler},
+        {.uri = "/stream", .method = HTTP_GET, .handler = stream_handler},
+        // 旧名（JPEG しか返さなかった頃の名前）。互換のために残している
+        {.uri = "/jpg", .method = HTTP_GET, .handler = image_handler},
         {.uri = "/jpg_stream", .method = HTTP_GET, .handler = stream_handler},
         {.uri = "/cpu", .method = HTTP_GET, .handler = cpu_handler},
         {.uri = "/status", .method = HTTP_GET, .handler = status_handler},

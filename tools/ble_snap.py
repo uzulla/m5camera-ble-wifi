@@ -8,7 +8,8 @@
 使い方:
   tools/ble_snap.py out.jpg                      # 既定（160x120, q=20）
   tools/ble_snap.py out.jpg "w=96&h=96&q=0&gray=1&rot=90"
-クエリは HTTP の /jpg と同じ書式。
+  tools/ble_snap.py out.pgm "w=96&h=96&fmt=pgm"   # 非圧縮（fmt=pgm|ppm|bgra）
+クエリは HTTP の /image と同じ書式。
 """
 import asyncio
 import struct

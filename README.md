@@ -12,8 +12,6 @@ tools/sync.sh build    # 同期してビルド
 tools/sync.sh flash    # 同期してビルド・書き込み（PORT=/dev/ttyUSB0）
 ```
 
-`backup/` に工場出荷ファームの全フラッシュイメージ（4MB）があります。戻すときは `esptool write-flash 0 backup/m5camera_112233445566_factory_full.bin`。
-
 ## ネットワーク
 
 | | |

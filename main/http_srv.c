@@ -47,9 +47,10 @@ static esp_err_t jpg_handler(httpd_req_t *req)
     if (snap_capture(&p, &s, err, sizeof(err)) != ESP_OK)
         return send_error(req, "500 Internal Server Error", err);
     char hv[32];
-    httpd_resp_set_type(req, "image/jpeg");
+    httpd_resp_set_type(req, s.mime);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_set_hdr(req, "X-Mode", s.mode);
+    httpd_resp_set_hdr(req, "X-Format", s.fmt_name);
     snprintf(hv, sizeof(hv), "%dx%d", s.w, s.h);
     httpd_resp_set_hdr(req, "X-Size", hv);
     esp_err_t e = httpd_resp_send(req, (const char *)s.data, s.len);
@@ -80,8 +81,8 @@ static void stream_task(void *arg)
             continue;
         }
         int hl = snprintf(hdr, sizeof(hdr),
-                          "\r\n--" STREAM_BOUNDARY "\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",
-                          (unsigned)s.len);
+                          "\r\n--" STREAM_BOUNDARY "\r\nContent-Type: %s\r\nContent-Length: %u\r\n\r\n",
+                          s.mime, (unsigned)s.len);
         esp_err_t e = httpd_resp_send_chunk(c->req, hdr, hl);
         if (e == ESP_OK) e = httpd_resp_send_chunk(c->req, (const char *)s.data, s.len);
         snap_free(&s);
@@ -220,7 +221,7 @@ static esp_err_t index_handler(httpd_req_t *req)
     static const char html[] =
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>M5Cam</title>"
         "<body style='font-family:sans-serif'><h3>M5Cam</h3><ul>"
-        "<li><a href='/jpg'>/jpg</a> (w, h, q, rot, gray, fit)</li>"
+        "<li><a href='/jpg'>/jpg</a> (w, h, q, rot, gray, fit, fmt=jpg|pgm|ppm|bgra)</li>"
         "<li><a href='/jpg?w=1600&h=1200&q=100'>/jpg?w=1600&amp;h=1200&amp;q=100</a> (最高画質)</li>"
         "<li><a href='/jpg?w=160&h=120&q=10&gray=1'>/jpg?w=160&amp;h=120&amp;q=10&amp;gray=1</a></li>"
         "<li><a href='/jpg_stream'>/jpg_stream</a> (+ fps)</li>"

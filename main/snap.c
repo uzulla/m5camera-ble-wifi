@@ -97,6 +97,13 @@ esp_err_t snap_params_parse(const char *query, snap_params_t *p, char *err, size
         else if (!strcmp(s, "stretch")) p->crop = false;
         else snprintf(err, errlen, "fit must be stretch or crop");
     }
+    if (httpd_query_key_value(query, "fmt", s, sizeof(s)) == ESP_OK) {
+        if (!strcmp(s, "jpg") || !strcmp(s, "jpeg")) p->fmt = SNAP_FMT_JPEG;
+        else if (!strcmp(s, "pgm")) p->fmt = SNAP_FMT_PGM;
+        else if (!strcmp(s, "ppm")) p->fmt = SNAP_FMT_PPM;
+        else if (!strcmp(s, "bgra")) p->fmt = SNAP_FMT_BGRA;
+        else snprintf(err, errlen, "fmt must be jpg, pgm, ppm or bgra");
+    }
     if (err[0]) return ESP_ERR_INVALID_ARG;
 
     if (hw && !hh) h = w * 3 / 4;
@@ -188,6 +195,23 @@ static inline uint8_t luma565(const uint8_t *p)
     return (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
 }
 
+// 非圧縮出力用。下位ビットを上位ビットで埋めて 0..255 に広げる（白が 255 になる）
+static inline void rgb888_from_565(const uint8_t *p, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    uint16_t v = (p[1] << 8) | p[0];
+    int r5 = v >> 11, g6 = (v >> 5) & 63, b5 = v & 31;
+    *r = (r5 << 3) | (r5 >> 2);
+    *g = (g6 << 2) | (g6 >> 4);
+    *b = (b5 << 3) | (b5 >> 2);
+}
+
+static const struct { const char *name, *mime; } FMTS[] = {
+    [SNAP_FMT_JPEG] = {"jpg", "image/jpeg"},
+    [SNAP_FMT_PGM] = {"pgm", "image/x-portable-graymap"},
+    [SNAP_FMT_PPM] = {"ppm", "image/x-portable-pixmap"},
+    [SNAP_FMT_BGRA] = {"bgra", "application/octet-stream"},
+};
+
 static esp_err_t capture_native(const snap_params_t *p, int idx, snap_t *out, char *err, size_t el)
 {
     apply_sensor(idx, sensor_q(p->q), p->rot == 180);
@@ -206,6 +230,7 @@ static esp_err_t capture_soft(const snap_params_t *p, snap_t *out, char *err, si
 {
     // w×h は撮影サイズ。90/270 のときは縦横が入れ替わった画像を返す
     bool odd = p->rot == 90 || p->rot == 270;
+    bool gray = p->gray || p->fmt == SNAP_FMT_PGM;
     int pw = p->w, ph = p->h;
     int fw = odd ? ph : pw, fh = odd ? pw : ph;   // 出力サイズ
     int idx = pick_size(pw, ph);
@@ -236,13 +261,24 @@ static esp_err_t capture_soft(const snap_params_t *p, snap_t *out, char *err, si
         else { ch = (int)((long)dw * ph / pw); cy0 = (dh - ch) / 2; }
     }
     int *sx = malloc(sizeof(int) * pw), *sy = malloc(sizeof(int) * ph);
-    int bpp = p->gray ? 1 : 2;
-    uint8_t *img = heap_caps_malloc((size_t)fw * fh * bpp, MALLOC_CAP_SPIRAM);
+    // 出力バッファ。非圧縮のときは [ヘッダ][画素] をそのまま返す
+    char head[24];
+    int hl = 0, bpp;
+    switch (p->fmt) {
+    case SNAP_FMT_PGM:  bpp = 1; hl = snprintf(head, sizeof(head), "P5 %d %d 255\n", fw, fh); break;
+    case SNAP_FMT_PPM:  bpp = 3; hl = snprintf(head, sizeof(head), "P6 %d %d 255\n", fw, fh); break;
+    case SNAP_FMT_BGRA: bpp = 4; break;
+    default:            bpp = gray ? 1 : 2; break;
+    }
+    size_t ilen = hl + (size_t)fw * fh * bpp;
+    uint8_t *img = heap_caps_malloc(ilen, MALLOC_CAP_SPIRAM);
     if (!sx || !sy || !img) {
         free(sx); free(sy); free(img); free(dec);
-        snprintf(err, el, "no memory");
+        snprintf(err, el, "no memory (need %u bytes for output)", (unsigned)ilen);
         return ESP_ERR_NO_MEM;
     }
+    memcpy(img, head, hl);
+    uint8_t *px = img + hl;
     for (int u = 0; u < pw; u++) sx[u] = cx0 + u * cw / pw;
     for (int v = 0; v < ph; v++) sy[v] = cy0 + v * ch / ph;
 
@@ -256,27 +292,45 @@ static esp_err_t capture_soft(const snap_params_t *p, snap_t *out, char *err, si
             default:  u = x;           v = y;          break;
             }
             const uint8_t *src = dec + ((size_t)sy[v] * dw + sx[u]) * 2;
-            size_t o = (size_t)y * fw + x;
-            if (p->gray) {
-                img[o] = luma565(src);
-            } else {
-                img[o * 2] = src[1];
-                img[o * 2 + 1] = src[0];
+            uint8_t *d = px + ((size_t)y * fw + x) * bpp;
+            if (p->fmt == SNAP_FMT_JPEG) {
+                if (gray) {
+                    d[0] = luma565(src);
+                } else {
+                    d[0] = src[1];
+                    d[1] = src[0];
+                }
+                continue;
+            }
+            uint8_t r, g, b;
+            rgb888_from_565(src, &r, &g, &b);
+            if (gray) r = g = b = (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
+            switch (p->fmt) {
+            case SNAP_FMT_PGM:  d[0] = r; break;
+            case SNAP_FMT_PPM:  d[0] = r; d[1] = g; d[2] = b; break;
+            default:            d[0] = b; d[1] = g; d[2] = r; d[3] = 0xFF; break;
             }
         }
     }
     free(sx); free(sy); free(dec);
 
+    out->w = fw;
+    out->h = fh;
+    if (p->fmt != SNAP_FMT_JPEG) {
+        out->data = img;
+        out->len = ilen;
+        out->mode = "raw";
+        out->_buf = img;
+        return ESP_OK;
+    }
+
     uint8_t *jpg = NULL;
     size_t jlen = 0;
-    ok = fmt2jpg(img, (size_t)fw * fh * bpp, fw, fh,
-                 p->gray ? PIXFORMAT_GRAYSCALE : PIXFORMAT_RGB565, p->q < 1 ? 1 : p->q, &jpg, &jlen);
+    ok = fmt2jpg(img, ilen, fw, fh, gray ? PIXFORMAT_GRAYSCALE : PIXFORMAT_RGB565, p->q < 1 ? 1 : p->q, &jpg, &jlen);
     free(img);
     if (!ok || !jpg) { snprintf(err, el, "encode failed"); return ESP_FAIL; }
     out->data = jpg;
     out->len = jlen;
-    out->w = fw;
-    out->h = fh;
     out->mode = "soft";
     out->_buf = jpg;
     return ESP_OK;
@@ -287,13 +341,16 @@ esp_err_t snap_capture(const snap_params_t *p, snap_t *out, char *err, size_t er
     memset(out, 0, sizeof(*out));
     if (!s_ready) { snprintf(err, errlen, "camera not ready"); return ESP_ERR_INVALID_STATE; }
     int idx = pick_size(p->w, p->h);
-    bool native = !p->gray && (p->rot == 0 || p->rot == 180) && idx >= 0 &&
+    bool native = p->fmt == SNAP_FMT_JPEG && !p->gray && (p->rot == 0 || p->rot == 180) && idx >= 0 &&
                   SIZES[idx].w == p->w && SIZES[idx].h == p->h;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_busy = true;
     esp_err_t e = native ? capture_native(p, idx, out, err, errlen) : capture_soft(p, out, err, errlen);
     s_busy = false;
     xSemaphoreGive(s_lock);
+    out->fmt = p->fmt;
+    out->fmt_name = FMTS[p->fmt].name;
+    out->mime = FMTS[p->fmt].mime;
     return e;
 }
 

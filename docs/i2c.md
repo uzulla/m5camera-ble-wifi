@@ -71,7 +71,7 @@ ESP32 の I2C スレーブはクロックストレッチができません。そ
 | `rot` | 時計回りに 0 / 90 / 180 / 270。90・270 は縦横が入れ替わる | 0 |
 | `gray` | 1 でグレースケール | 0 |
 | `fit` | `stretch` / `crop` | stretch |
-| `fmt` | `jpg` / `pgm`（gray8）/ `ppm`（RGB24）/ `bgra`（生 BGRA）。README の「非圧縮の形式」 | jpg |
+| `fmt` | `jpg` / `pgm`（gray8）/ `ppm`（RGB24）/ `bgra`（生 BGRA）。`jpg` 以外は 320x240 まで。README の「非圧縮の形式」 | jpg |
 
 - 撮影中（state=1）に SNAP を送ると無視される。
 - 前回の画像は、新しい SNAP を受けた時点で破棄される。画像は次の SNAP まで保持され、何度でも読み出せる。

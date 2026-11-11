@@ -37,6 +37,8 @@ static const char *TAG = "snap";
 #define SOFT_MAX_W 800   // soft 経路で扱える加工前の最大サイズ（PSRAM に収めるため）
 #define SOFT_MAX_H 600
 #define SOFT_SENSOR_Q 10
+#define RAW_MAX_W 320    // 非圧縮（pgm / ppm / bgra）は大きいとメモリと帯域を食い潰せるので、低解像度専用にする
+#define RAW_MAX_H 240
 
 typedef struct { int w, h; framesize_t fs; } fsize_t;
 static const fsize_t SIZES[] = {
@@ -109,6 +111,14 @@ esp_err_t snap_params_parse(const char *query, snap_params_t *p, char *err, size
     if (hw && !hh) h = w * 3 / 4;
     if (hh && !hw) w = h * 4 / 3;
     if (hw || hh) { p->w = w; p->h = h; }
+    if (p->fmt != SNAP_FMT_JPEG) {
+        // サイズ未指定で既定が上限を超えるとき（HTTP の 640x480）は、上限に合わせる
+        if (!hw && !hh && (p->w > RAW_MAX_W || p->h > RAW_MAX_H)) { p->w = RAW_MAX_W; p->h = RAW_MAX_H; }
+        if (p->w > RAW_MAX_W || p->h > RAW_MAX_H) {
+            snprintf(err, errlen, "pgm/ppm/bgra: w/h must be <= %dx%d", RAW_MAX_W, RAW_MAX_H);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
     if (p->w < 1 || p->h < 1 || p->w > 1600 || p->h > 1200) {
         snprintf(err, errlen, "w/h must be 1..1600 / 1..1200");
         return ESP_ERR_INVALID_ARG;

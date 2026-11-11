@@ -11,7 +11,8 @@
 //   gray   : 1 でグレースケール（サイズがさらに小さくなる）
 //   fit    : stretch（既定。縦横比を無視して合わせる）/ crop（中央を切り出す）
 //   fmt    : jpg（既定）/ pgm（gray8。gray=1 扱いになる）/ ppm（RGB24）/ bgra（ヘッダなしの生 BGRA、A=255）
-//            pgm / ppm は 1 行のヘッダ "P5 <w> <h> 255\n" / "P6 <w> <h> 255\n" の後に生バイトが続く。q は無視される
+//            pgm / ppm は 1 行のヘッダ "P5 <w> <h> 255\n" / "P6 <w> <h> 255\n" の後に生バイトが続く。q は無視される。
+//            jpg 以外は撮影サイズ 320x240 まで（サイズ未指定で既定がそれを超えるときは 320x240 になる）
 typedef enum { SNAP_FMT_JPEG = 0, SNAP_FMT_PGM, SNAP_FMT_PPM, SNAP_FMT_BGRA } snap_fmt_t;
 
 typedef struct {
